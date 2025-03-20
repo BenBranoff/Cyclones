@@ -69,14 +69,14 @@ wind speed and storm size by quadrant:
 
 ``` r
 ###  Asymptotic models by storm size and quadrant
-print(ggplot(quaddist%>%filter(!is.na(dist)),aes(x=speed,y=dist,col=factor(quad)))+
+ggplot(quaddist%>%filter(!is.na(dist)),aes(x=speed,y=dist,col=factor(quad)))+
   geom_point(size=0.5)+
   geom_point(data=quaddist%>%group_by(quad,speed,USA_SSHS) %>%summarise(dist=mean(dist,na.rm=T)))+
   stat_smooth(method = "nls", formula = y ~ SSasymp(x, Asym, R0, lrc),se=FALSE)+
   facet_wrap(~USA_SSHS)+
   labs(col="Quadrant")+
   ggtitle("North Atlantic Tropical Cyclone Wind Speed Distance by Storm Saffir-Simpson Scale\nAsymptotic models")+
-  xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)"))
+  xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)")
 ```
 
 ![](README_files/figure-gfm/plot%20models-1.png)<!-- -->
@@ -84,7 +84,7 @@ print(ggplot(quaddist%>%filter(!is.na(dist)),aes(x=speed,y=dist,col=factor(quad)
 ``` r
 ###  a linear model of the wind speed distance as a function of wind speed and storm size
 ###  fit doesnt seem as good as the non-linear model
-print(ggplot(quaddist,aes(x=log(speed),y=dist,col=quad))+
+ggplot(quaddist,aes(x=log(speed),y=dist,col=quad))+
 geom_point()+
   geom_point(data=quaddist%>%
                filter(!is.na(dist))%>%
@@ -94,7 +94,7 @@ geom_point()+
   facet_wrap(~USA_SSHS)+
   labs(col="Quadrant")+
   ggtitle("North Atlantic Tropical Cyclone Wind Speed Distance by Storm Saffir-Simpson Scale\nLinear models")+
-  xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)"))
+  xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)")
 ```
 
 ![](README_files/figure-gfm/plot%20models-2.png)<!-- --> In general, the
