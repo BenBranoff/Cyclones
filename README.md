@@ -6,10 +6,11 @@ Ben Branoff
 R utilities for modeling and analyzing meteorological cyclones. Fit
 models to observations of storm characteristics and use these models to
 predict and interpolate wind and pressure fields across a storm’s area.
-
-## Build Wind Models
-
-## Read in and parse previous cyclone data
+\## Build Wind Models
+<details>
+<summary>
+\## Read in and parse previous cyclone data
+</summary>
 
 Start with the IBTrACS data (updated data available at:
 <https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/>)
@@ -22,7 +23,7 @@ library(purrr)
 
 ###  Load in the North Atlantic data only:
 IBTrACS <- read.csv(paste0(dirname(getwd()),"./data/ibtracs.NA.list.v04r01.csv"))
-####  limit to storms in or after 2020 for brevity
+####  limit to storms in or after 2000 for brevity
 IBTrACS <- IBTrACS %>%
   filter(SEASON>=2000)
 ```
@@ -57,8 +58,11 @@ quaddist <- bind_rows(
     dplyr::select(-USA_WIND) %>%  
     tidyr::unnest(quad) %>%  
     rename(dist=USA_RMW)) %>%  
-    mutate(across(c(dist, speed,USA_EYE,USA_ROCI,USA_POCI,USA_PRES), ~as.numeric(.)))
+    mutate(across(c(dist, speed,USA_EYE,USA_ROCI,USA_POCI,USA_PRES), ~as.numeric(.)),
+           USA_SSHS_lab=paste0("Cat. ",USA_SSHS))
 ```
+
+</details>
 
 ## Fit models from previous hurricane data
 
@@ -82,6 +86,20 @@ ggplot(quaddist%>%filter(!is.na(dist)),aes(x=speed,y=dist,col=factor(quad)))+
 ![](README_files/figure-gfm/plot%20models-1.png)<!-- -->
 
 ``` r
+####  close up of Category 5 storms
+ggplot(quaddist%>%filter(!is.na(dist),USA_SSHS==5),aes(x=speed,y=dist,col=factor(quad)))+
+  geom_point(size=0.5)+
+  geom_point(data=quaddist%>%group_by(quad,speed,USA_SSHS) %>%summarise(dist=mean(dist,na.rm=T)),size=1)+
+  stat_smooth(method = "nls", formula = y ~ SSasymp(x, Asym, R0, lrc),se=FALSE)+
+  facet_wrap(~USA_SSHS_lab)+
+  labs(col="Quadrant")+
+  ggtitle("North Atlantic Tropical Cyclone Wind Speed Distance by Storm Saffir-Simpson Scale\nAsymptotic models")+
+  xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)")
+```
+
+![](README_files/figure-gfm/plot%20models-2.png)<!-- -->
+
+``` r
 ###  a linear model of the wind speed distance as a function of wind speed and storm size
 ###  fit doesnt seem as good as the non-linear model
 ggplot(quaddist,aes(x=log(speed),y=dist,col=quad))+
@@ -97,7 +115,7 @@ geom_point()+
   xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)")
 ```
 
-![](README_files/figure-gfm/plot%20models-2.png)<!-- --> In general, the
+![](README_files/figure-gfm/plot%20models-3.png)<!-- --> In general, the
 SW quadrant has higher winds closer to the center, and the NE quadrant
 has the same wind speeds farther out. Storm size also seems to be
 important. The linear model does not seem to fit as well as the
@@ -119,16 +137,16 @@ summary(modquad_asymp)
     ## 
     ## Parameters:
     ##       Estimate Std. Error t value Pr(>|t|)    
-    ## Asym  13.77161    0.42582   32.34   <2e-16 ***
-    ## R0   776.66690   14.78825   52.52   <2e-16 ***
-    ## lrc   -2.85650    0.01091 -261.85   <2e-16 ***
+    ## Asym  13.77095    0.42665   32.28   <2e-16 ***
+    ## R0   777.11506   14.80396   52.49   <2e-16 ***
+    ## lrc   -2.85674    0.01092 -261.68   <2e-16 ***
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
     ## 
-    ## Residual standard error: 39 on 73305 degrees of freedom
+    ## Residual standard error: 39.09 on 73335 degrees of freedom
     ## 
     ## Number of iterations to convergence: 5 
-    ## Achieved convergence tolerance: 7.099e-07
+    ## Achieved convergence tolerance: 6.984e-07
     ##   (10212 observations deleted due to missingness)
 
 ``` r
@@ -142,38 +160,38 @@ summary(modquad)
     ## 
     ## Residuals:
     ##    Min     1Q Median     3Q    Max 
-    ## -97.93 -27.80  -7.44  19.99 364.79 
+    ## -98.02 -27.84  -7.47  19.95 364.66 
     ## 
     ## Coefficients:
     ##                    Estimate Std. Error t value Pr(>|t|)    
-    ## (Intercept)        463.0415     1.6329   283.6   <2e-16 ***
-    ## log(speed):quadNE  -98.6381     0.4111  -240.0   <2e-16 ***
-    ## log(speed):quadNW -100.1191     0.4174  -239.9   <2e-16 ***
-    ## log(speed):quadSE  -99.8446     0.4111  -242.9   <2e-16 ***
-    ## log(speed):quadSW -103.5367     0.4111  -251.9   <2e-16 ***
+    ## (Intercept)        463.4697     1.6356   283.4   <2e-16 ***
+    ## log(speed):quadNE  -98.7214     0.4117  -239.8   <2e-16 ***
+    ## log(speed):quadNW -100.2221     0.4181  -239.7   <2e-16 ***
+    ## log(speed):quadSE  -99.9373     0.4117  -242.7   <2e-16 ***
+    ## log(speed):quadSW -103.6325     0.4118  -251.7   <2e-16 ***
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
     ## 
-    ## Residual standard error: 41.03 on 73303 degrees of freedom
+    ## Residual standard error: 41.11 on 73333 degrees of freedom
     ##   (10212 observations deleted due to missingness)
-    ## Multiple R-squared:  0.465,  Adjusted R-squared:  0.465 
-    ## F-statistic: 1.593e+04 on 4 and 73303 DF,  p-value: < 2.2e-16
+    ## Multiple R-squared:  0.4646, Adjusted R-squared:  0.4646 
+    ## F-statistic: 1.591e+04 on 4 and 73333 DF,  p-value: < 2.2e-16
 
 ``` r
 AIC(modquad,modquad_asymp)
 ```
 
     ##               df      AIC
-    ## modquad        6 752621.3
-    ## modquad_asymp  4 745199.4
+    ## modquad        6 753213.5
+    ## modquad_asymp  4 745809.1
 
 ``` r
 BIC(modquad,modquad_asymp)
 ```
 
     ##               df      BIC
-    ## modquad        6 752676.5
-    ## modquad_asymp  4 745236.2
+    ## modquad        6 753268.7
+    ## modquad_asymp  4 745846.0
 
 By AIC and BIC, the asymptotic model is marginally better, not enough
 for a true determination of fitness. Try new models grouped by storm
@@ -247,16 +265,16 @@ bind_rows(map2(modquads$model_asymp,modquads$model_lm,~AIC(.x,.y)) %>%
     ## # Groups:   USA_SSHS, quad [20]
     ##       df  score USA_SSHS quad  model type  bestAIC bestBIC
     ##    <dbl>  <dbl>    <int> <chr> <chr> <chr> <chr>   <chr>  
-    ##  1     4 98137.        1 NE    asymp AIC   asymp   asymp  
-    ##  2     3 98519.        1 NE    lm    AIC   asymp   asymp  
-    ##  3     4 74990.        1 NW    asymp AIC   asymp   asymp  
+    ##  1     4 98266.        1 NE    asymp AIC   asymp   asymp  
+    ##  2     3 98646.        1 NE    lm    AIC   asymp   asymp  
+    ##  3     4 74989.        1 NW    asymp AIC   asymp   asymp  
     ##  4     3 75260.        1 NW    lm    AIC   asymp   asymp  
-    ##  5     4 97396.        1 SE    asymp AIC   asymp   asymp  
-    ##  6     3 97730.        1 SE    lm    AIC   asymp   asymp  
-    ##  7     4 96397.        1 SW    asymp AIC   asymp   asymp  
-    ##  8     3 96732.        1 SW    lm    AIC   asymp   asymp  
-    ##  9     4 40656.        2 NE    asymp AIC   asymp   asymp  
-    ## 10     3 40983.        2 NE    lm    AIC   asymp   asymp  
+    ##  5     4 97412.        1 SE    asymp AIC   asymp   asymp  
+    ##  6     3 97743.        1 SE    lm    AIC   asymp   asymp  
+    ##  7     4 96399.        1 SW    asymp AIC   asymp   asymp  
+    ##  8     3 96734.        1 SW    lm    AIC   asymp   asymp  
+    ##  9     4 40736.        2 NE    asymp AIC   asymp   asymp  
+    ## 10     3 41063.        2 NE    lm    AIC   asymp   asymp  
     ## # ℹ 70 more rows
 
 The asymptotic model is a better fit for most combinations of quadrant
@@ -370,3 +388,69 @@ greater than 0. Save the models to use in later steps.
     saveRDS(eyemod%>% select(-c(data,pred)),"eyemod.rds")
     saveRDS(ROCImod%>% select(-c(data,pred)),"ROCI.rds")
     saveRDS(POCImod%>% select(-c(data,pred)),"POCImod.rds")
+
+\## Reconstruct wind and pressure fields for individual storms
+With the models from the above steps, we can now predict the extent of different wind speeds, including the maximum winds, as well as the radius of the eye wall, and the maximum extent of a storm, for any previous storm that does not include this information. 
+
+Hurricane Camille made landfall in the Gulf Coast state of Mississippi in August of 1969. It was a devastating storm in many ways, but the IBTRACs data does not include information on the extent of any of the wind speeds. It includes only the maximum wind speed and one observation with the extent. To properly assess the intensity of the storm at any point along its path, we need to first predict where the different wind speeds (34, 50, and 64 knots) occurred. Here, we predict where the different winds occurred based on the minimum pressure and the maximum wind speed, and then project the location of the various wind speeds (34, 50, and 64 knots) onto arcs described by the predicted radius and quadrant. We do this iteratively for each time step. 
+``` r
+###  we will need some additional libraries
+###  if we want to use parallel processing, we will need to load the snowfall package as well
+library(sf)
+library(dplyr)
+library(purrr)
+library(tibble)
+#library(snowfall)
+
+###  grab the tabular data for Camille
+IBTrACS <- read.csv("ibtracs.NA.list.v04r01.csv")) %>%
+  filter(SEASON==1969,NAME=="CAMILLE")%>%
+  ##  make sure the timestamp is appropriately formatted
+  mutate(ISO_TIME <- as.POSIXct(ISO_TIME,tz="GMT"),
+  BASIN=if_else(is.na(BASIN),"NA",BASIN))
+  
+##source the functions
+source("Swath Maker helpers.R")
+
+##  use the 'make_swaths' function interatively over each timestep to reconstruct the spatial extent of all wind speeds
+linesswaths <- lapply(1:nrow(tr),make_swaths,mod=modquads,emod=eyemod,rocimod=ROCImod,pocimod=POCImod,tracks=tr,minpresss=minpress)
+
+##  the parallel version. Only use if confident in machine's ability to do so
+##  choose an appropriate number of cpus (roughly %50-75 of available cpus)
+#sfInit(parallel=TRUE, cpus=15)
+#load the appropiate libraries
+#sfLibrary(sf)
+#sfLibrary(dplyr)
+#sfLibrary(purrr)
+#sfLibrary(tibble)
+#sfExport('rot')
+#linesswaths <- sfLapply(1:nrow(tr),make_swaths,mod=modquads,emod=eyemod,rocimod=ROCImod,pocimod=POCImod,tracks=tr,minpresss=minpress)
+
+##  The function returns results in two forms, linestrings and polygons
+##  separate into their respective parts
+swaths <- do.call(rbind,lapply(linesswaths,'[[',1))
+linestrings <-  do.call(rbind,lapply(linesswaths,'[[',2))
+
+
+###  visualize the result
+bind_rows(swaths %>% mutate(geomtype="polys"),linestrings %>%mutate(geomtype="lines"))%>%
+arrange(kts)%>%
+ggplot()+
+geom_sf(data=ne_countries(country=c("united states of america","mexico","canada"),scale="medium"),fill=NA)+
+geom_sf(aes(col=kts,fill=kts))+
+scale_color_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(0, 150))+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+limits = c(0, 150))+
+facet_wrap(~geomtype)+
+ggtitle("Hurricane Camille wind extents")+
+theme_bw()+
+xlim(100,80)+ylim(20,45)
+
+```
+![](README_files/figure-gfm/Camille - lines and polys.png)<!-- -->
+    

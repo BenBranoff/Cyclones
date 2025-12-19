@@ -1,9 +1,8 @@
-<<<<<<< HEAD
 ---
 title: "Cyclones Introduction"
 author: "Ben Branoff"
 date: "2025-03-18"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
@@ -12,8 +11,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 R utilities for modeling and analyzing meteorological cyclones. Fit models to observations of storm characteristics and use these models to predict and interpolate wind and pressure fields across a storm's area. 
 
-## Build Wind Models
-## Read in and parse previous cyclone data
+
+<details>
+<summary>Read in and parse previous cyclone data</summary>
 Start with the IBTrACS data (updated data available at: https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/)
 
 ```{r loading, include=TRUE,warning=FALSE,message=FALSE}
@@ -24,7 +24,7 @@ library(purrr)
 
 ###  Load in the North Atlantic data only:
 IBTrACS <- read.csv(paste0(dirname(getwd()),"./data/ibtracs.NA.list.v04r01.csv"))
-####  limit to storms in or after 2020 for brevity
+####  limit to storms in or after 2000 for brevity
 IBTrACS <- IBTrACS %>%
   filter(SEASON>=2000)
 ```
@@ -57,11 +57,14 @@ quaddist <- bind_rows(
     dplyr::select(-USA_WIND) %>%  
     tidyr::unnest(quad) %>%  
     rename(dist=USA_RMW)) %>%  
-    mutate(across(c(dist, speed,USA_EYE,USA_ROCI,USA_POCI,USA_PRES), ~as.numeric(.)))
+    mutate(across(c(dist, speed,USA_EYE,USA_ROCI,USA_POCI,USA_PRES), ~as.numeric(.)),
+           USA_SSHS_lab=paste0("Cat. ",USA_SSHS))
 ```
-##  Fit models from previous hurricane data
+</details>
+<details>
+<summary>Fit models from previous hurricane data</summary>
 We need these to reconstruct wind extents for any given storm with limited information. Here are non-linear asymptotic models as well as log-tansformed linear models of the wind speed distance as a function of wind speed and storm size by quadrant:
-```{r plot models,warning=FALSE,message=FALSE}
+```{r plot models,echo=TRUE,warning=FALSE,message=FALSE}
 ###  Asymptotic models by storm size and quadrant
 ggplot(quaddist%>%filter(!is.na(dist)),aes(x=speed,y=dist,col=factor(quad)))+
   geom_point(size=0.5)+
@@ -71,6 +74,17 @@ ggplot(quaddist%>%filter(!is.na(dist)),aes(x=speed,y=dist,col=factor(quad)))+
   labs(col="Quadrant")+
   ggtitle("North Atlantic Tropical Cyclone Wind Speed Distance by Storm Saffir-Simpson Scale\nAsymptotic models")+
   xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)")
+
+####  close up of Category 5 storms
+ggplot(quaddist%>%filter(!is.na(dist),USA_SSHS==5),aes(x=speed,y=dist,col=factor(quad)))+
+  geom_point(size=0.5)+
+  geom_point(data=quaddist%>%group_by(quad,speed,USA_SSHS) %>%summarise(dist=mean(dist,na.rm=T)),size=1)+
+  stat_smooth(method = "nls", formula = y ~ SSasymp(x, Asym, R0, lrc),se=FALSE)+
+  facet_wrap(~USA_SSHS_lab)+
+  labs(col="Quadrant")+
+  ggtitle("North Atlantic Tropical Cyclone Wind Speed Distance by Storm Saffir-Simpson Scale\nAsymptotic models")+
+  xlab("Wind Speed (kts)")+ylab("Max. distance from center (nmi)")
+
 
 ###  a linear model of the wind speed distance as a function of wind speed and storm size
 ###  fit doesnt seem as good as the non-linear model
@@ -99,7 +113,7 @@ BIC(modquad,modquad_asymp)
 ```
 By AIC and BIC, the asymptotic model is marginally better, not enough for a true determination of fitness. Try new models grouped by storm size (saffir simpson and or quad, rather than a single model with these as covariables (in the linear model's case). 
 
-```{r grouped models,include=TRUE,warning=FALSE,message=FALSE}
+```{r grouped models,echo=TRUE,include=TRUE,warning=FALSE,message=FALSE}
 ##  create new dataset with all wind speeds present for each storm size and quadrant
 quaddist_new <- quaddist %>%
   filter(USA_SSHS>=1)%>%
@@ -218,6 +232,8 @@ POCImod <- quaddist %>%
   group_nest(USA_SSHS) %>%
   mutate(model=map(data,~lm(Pressdif~USA_WIND,data=.)),
          pred=map(model, predict))
+```
+```{r pocimodplot,warning=FALSE,message=FALSE}
 ggplot(POCImod %>% tidyr::unnest(c(data,pred)),
        aes(x=USA_WIND,y=Pressdif))+
   geom_point()+
@@ -238,10 +254,34 @@ saveRDS(POCImod%>% select(-c(data,pred)),"POCImod.rds")
 
 ```
 
-```{r, include=FALSE}
+```{r copying previous instance to git, include=FALSE}
    # add this chunk to end of mycode.rmd
-   file.copy(from="index.html", to=paste0(dirname(getwd()),"/README.md"))
+   file.copy(from="README.md", overwrite=TRUE,to=paste0(dirname(getwd()),"/README.md"))
+   file.copy(from="README_files", overwrite=TRUE,to=paste0(dirname(getwd()),"/README_files"),recursive=TRUE)
 ```
-=======
+</details>
 
->>>>>>> 274393de305b2cfef6abacb4110ed52c3d7751a4
+<details>
+<summary> Reconstruct wind fields </summary>
+The IBTrACS data and other products from the National Hurricane Center typically only include information regarding 34,50, and 64 knot sustained winds. Since 2023, the data also includes information about the maximum sustained winds within the storm. For many use cases, this is not enough information and we need to know the estimated winds anywhere in a storm and at any given time. 
+
+Using the models from above, we can now build wind fields for any historical storm using the limited information given.
+
+Pick a storm
+```{r loading, include=TRUE,warning=FALSE,message=FALSE}
+library(sf)
+Maria <- read_sf("C:\\Users\\BenjaminBranoff\\OneDrive - USDA\\Hurricanes\\IBTrACS.NA.list.v04r01.lines.shp")%>%
+  filter(SEASON==2017,NAME=="MARIA")
+bounds <- read_sf("./Cyclones/data/ne_110m_admin_0_countries.shp")
+###  plot the 
+plot(st_geometry(Maria%>%st_transform(st_crs(bounds))),col="red")
+plot(st_geometry(bounds),add=T)
+####  only includes the track
+###  use the included wind
+swaths <- apply(Maria,MARGIN=1,FUN=function(x) (make_swaths(1,atracks=IBTrACS,mod=modquads,emod=eyemod,
+            rocimod=ROCImod,pocimod=POCImod,tracks=x,fillwinds=TRUE)))
+lines <- lapply(swaths,"[[",2)
+lines <- bind_rows(lines)
+plot(lines[lines$kts>100,"kts"],add=TRUE)
+```
+</details>
