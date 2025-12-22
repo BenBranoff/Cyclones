@@ -529,7 +529,7 @@ dts = unique(lne$date)[1:(length(unique(lne$date))-1)]
 ###  The TPS interpolation is resource hungry and may be limited on insufficent machines. There are alternatives but those arent discussed here.
 
 ###  the non-parallel version, much slower, is
-fields <- sapply(dts,FUN=fields_wrapper,dates=dts,line=lne,track_points=trck_points,oldw=getOption("warn"),track=IBTrACS,parll=F)
+fields <- lapply(dts,FUN=fields_wrapper,dates=dts,line=lne,track_points=trck_points,oldw=getOption("warn"),track=IBTrACS,parll=F)
 
 ### the parallel version
 #library(snowfall)
@@ -544,5 +544,88 @@ fields <- sapply(dts,FUN=fields_wrapper,dates=dts,line=lne,track_points=trck_poi
 #sfExport('comparewinds')
 #sfExport('get_dir')
 fields <- sfLapply(dts,fun=fields_wrapper,dates=dts,line=lne,track_points=trck_points,oldw=getOption("warn"),track=IBTrACS,parll=T)
+```
+Walking through the individual steps behind the fields_wrapper function shows how the final results are constructed. Here, we pick the same time as above, when the storm was at its most intense and close to making landfall. This will show the full range of the interpolation. The function will take the two line segments corresponding to the present time stamp as well as the next one. It then creates a custom coordinate reference system centered on those segments. This helps ensure proper distance calculations and minimizes distortion. It then shifts the second segment to be centered on the first. This allows for linear interpretation once the two end points are calculated. To calculate the end points, the function uses a Thin Plate Spline algorithm with the wind extent linestrings as the input. Here is a summary of the code and a graphical illustration below:
+
+```r
+d1 = as.POSIXct("1969-08-17 12:00:00", tz="GMT")
+d2 = as.POSIXct("1969-08-17 15:00:00", tz="GMT")
+line1 <- lne %>% filter(date==d1)
+line2 <- lne %>% filter(date==d2)
+###  create custom crs centered on current track segment
+##  this reduces geometry calculation errors from using a general global crs
+custCRS <- paste0("+proj=laea +x_0=0 +y_0=0 +lon_0=",
+                  st_coordinates(trck_points[trck_points$ISO_TIME==d2,] %>%st_transform(4326))[,"X"],
+                  " +lat_0=",
+                  st_coordinates(trck_points[trck_points$ISO_TIME==d2,]%>%st_transform(4326))[,"Y"])
+###  calculate the delta x and delta y between the two locations
+###  we will use this to align the two dates on top of eachother so we can then interpolate between them
+coord_dif <- st_coordinates(trck_points[trck_points$ISO_TIME==d2,] %>% st_transform(custCRS))-
+  st_coordinates(trck_points[trck_points$ISO_TIME==d1,]%>% st_transform(custCRS))
+## get all of the dates and calculate the time difference between each
+##  this is important for calculating energy dissipation, which is a function of the time
+dates <- trck_points$ISO_TIME[trck_points$ISO_TIME<=d2&trck_points$ISO_TIME>=d1]
+dt <- unique(difftime(dates, lag(dates),unit="hours"))
+dt <- as.numeric(dt[!is.na(dt)])
+###  now shift the second line segment to be centered on the first
+##  this will allow us to interpolate raster representations between the two times
+line2.2 <- st_as_sfc(line2 %>% st_transform(custCRS))-matrix(data=coord_dif,ncol=2)
+line2.2 <- st_sf(geom=line2.2)
+st_crs(line2.2) <- custCRS
+line2.2 <- line2.2 %>% st_transform(st_crs(line1))  %>%
+  st_as_sf() %>%
+  rename(geometry=geom)
+line2.2<- cbind(line2.2,st_drop_geometry(line2))
+
+bind_rows(line1 %>% mutate(source="original - line1"),line2 %>% mutate(source="original - line2"),line2.2 %>% mutate(source="shifted- line2"),
+rbind(line1,line2.2) %>% mutate(source="original-line1 + shifted-line2"))%>%
+arrange(kts)%>%
+ggplot()+
+geom_sf(data=rnaturalearth::ne_countries(country=c("united states of america","mexico","canada"),scale="medium"),fill=NA)+
+geom_sf(aes(col=kts,fill=kts))+
+scale_color_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(0, 150))+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+limits = c(0, 150))+
+facet_wrap(~source)+
+ggtitle("Line shifting")+
+theme_bw()+
+xlim(347650,1128130)+ylim(-1729130,-948305)
+
 
 ```
+![](README_files/figure-gfm/line-shifting.png)<!-- -->
+
+In the above graph, you can see the shift of line 2, corresponding to the later date. In this case, the only difference between time 1 and time 2 according to the native tabular data is that the maximum sustained wind at time 1 is 140 knots, while that of time 2 is 138. These 2 knots do not translate to a (rounded) distance difference in the models. Therefore, everything else being equal (remember storms dating this far back have little other information to inform the models), there is no difference between the lines at timestep 1 and those at timestep 2, other than their position. When we shift the time 2 lines back to be centered at time 1, they overlap perfectly.    
+
+
+
+The above results in a series of raster images, as well as a dataframe that compares the resulting raster winds with values from the original lines (as a quality check). The rasters are wrapped, because rasters are kept on disc, not in memory, which does not allow for parallel processing. Wrapping them gets around this. The rasters represent the wind, power, and wind direction at each time stamp that was passed to the function as well as the 3 min interpolated time steps. These are raster stacks, which each layer in each stack representing a different time stamp. 
+
+```r
+####  create a blank raster with a specific resolution you want to resample to, in this case 5 km
+r <- rast(ext=trck_points %>%
+              st_buffer(max(lne$dist_m_mean[lne$quad=="ROCI"],na.rm=T)) %>%
+              summarise() %>% ext(), resolution=5000, 
+            crs="+proj=lcc +lat_0=40 +lon_0=-96 +lat_1=20 +lat_2=60 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs +type=crs")
+
+###  extract the velocity layer from the listed results
+rstackV <- lapply(fields,'[[',1)
+### unwrap individual timesteps and stack them
+rstackV <- rast(lapply(rstackV , function(x) if (!is.null(x)){resample(unwrap(x),r)}))
+
+
+
+
+```
+
+
+Its hard to visualize raster stacks, but we can easily aggregate the stacks to show a summary. For example, the maximum of the velocity layer would be the maximum wind velocity experienced by each pixel throughout the storm's lifetime. 
+
+
+
+
