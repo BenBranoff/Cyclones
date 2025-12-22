@@ -40,7 +40,7 @@ quaddist <- bind_rows(
            USA_R50_NE,USA_R50_SE,USA_R50_NW,USA_R50_SW,  
            USA_R64_NE,USA_R64_SE,USA_R34_NW,USA_R64_SW,
            ###  these are identifiers and more variables important for additional models
-           SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,USA_WIND,USA_PRES,USA_ROCI,USA_POCI,USA_PRES) %>%
+           SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,USA_WIND,USA_PRES,USA_ROCI,USA_POCI,USA_PRES,BASIN) %>%
     tidyr::pivot_longer(cols=c(USA_R34_NE,USA_R34_SE,USA_R34_NW,USA_R34_SW,  
                                USA_R50_NE,USA_R50_SE,USA_R50_NW,USA_R50_SW,  
                                USA_R64_NE,USA_R64_SE,USA_R34_NW,USA_R64_SW),  
@@ -49,7 +49,7 @@ quaddist <- bind_rows(
     mutate(speed=as.numeric(speed),  
            source="swaths"),  
   IBTrACS %>%  
-    select(SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,USA_WIND,USA_PRES,USA_ROCI,USA_POCI,USA_PRES) %>%
+    select(SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,USA_WIND,USA_PRES,USA_ROCI,USA_POCI,USA_PRES,BASIN) %>%
     ###  there are also two columns that describe the maximum wind speed and its maximum distance in the storm
     ###  this is not provided for each quadrant and so is assumed to be circular and symmetric
     mutate(quad=list(c("NE","SE","SW","NW")),  
@@ -388,8 +388,13 @@ greater than 0. Save the models to use in later steps.
     saveRDS(eyemod%>% select(-c(data,pred)),"eyemod.rds")
     saveRDS(ROCImod%>% select(-c(data,pred)),"ROCI.rds")
     saveRDS(POCImod%>% select(-c(data,pred)),"POCImod.rds")
+    minpress <- quaddist %>% mutate(MONTH=format.Date(ISO_TIME,"%m")) %>%group_by(BASIN,USA_SSHS,MONTH) %>%summarise(USA_PRES=mean(USA_PRES,na.rm=TRUE))
+    write.csv(minpress,"minpress.csv",row.names=FALSE)
+    ###  note, when reading this data set back in, make sure the NA basin for North America is not set to missing (NA)
+    ##  minpress <- minpress %>% mutate(BASIN=if_else(is.na(BASIN),"NA",BASIN))
+    
+## Reconstruct wind and pressure fields for individual storms
 
-\## Reconstruct wind and pressure fields for individual storms
 With the models from the above steps, we can now predict the extent of different wind speeds, including the maximum winds, as well as the radius of the eye wall, and the maximum extent of a storm, for any previous storm that does not include this information. 
 
 Hurricane Camille made landfall in the Gulf Coast state of Mississippi in August of 1969. It was a devastating storm in many ways, but the IBTRACs data does not include information on the extent of any of the wind speeds. It includes only the maximum wind speed and one observation with the extent. To properly assess the intensity of the storm at any point along its path, we need to first predict where the different wind speeds (34, 50, and 64 knots) occurred. Here, we predict where the different winds occurred based on the minimum pressure and the maximum wind speed, and then project the location of the various wind speeds (34, 50, and 64 knots) onto arcs described by the predicted radius and quadrant. We do this iteratively for each time step. 
@@ -403,17 +408,18 @@ library(tibble)
 #library(snowfall)
 
 ###  grab the tabular data for Camille
-IBTrACS <- read.csv("ibtracs.NA.list.v04r01.csv")) %>%
+IBTrACS <- read.csv("ibtracs.ALL.list.v04r01.csv") %>%
   filter(SEASON==1969,NAME=="CAMILLE")%>%
   ##  make sure the timestamp is appropriately formatted
-  mutate(ISO_TIME <- as.POSIXct(ISO_TIME,tz="GMT"),
+  mutate(ISO_TIME = as.POSIXct(ISO_TIME,tz="GMT"),
+  MONTH=format.Date(ISO_TIME,"%m"),
   BASIN=if_else(is.na(BASIN),"NA",BASIN))
   
 ##source the functions
 source("Swath Maker helpers.R")
 
 ##  use the 'make_swaths' function interatively over each timestep to reconstruct the spatial extent of all wind speeds
-linesswaths <- lapply(1:nrow(tr),make_swaths,mod=modquads,emod=eyemod,rocimod=ROCImod,pocimod=POCImod,tracks=tr,minpresss=minpress)
+linesswaths <- lapply(1:nrow(IBTrACS),make_swaths,mod=modquads,emod=eyemod,rocimod=ROCImod,pocimod=POCImod,tracks=IBTrACS,minpresss=minpress)
 
 ##  the parallel version. Only use if confident in machine's ability to do so
 ##  choose an appropriate number of cpus (roughly %50-75 of available cpus)
@@ -425,6 +431,7 @@ linesswaths <- lapply(1:nrow(tr),make_swaths,mod=modquads,emod=eyemod,rocimod=RO
 #sfLibrary(tibble)
 #sfExport('rot')
 #linesswaths <- sfLapply(1:nrow(tr),make_swaths,mod=modquads,emod=eyemod,rocimod=ROCImod,pocimod=POCImod,tracks=tr,minpresss=minpress)
+#sfStop()
 
 ##  The function returns results in two forms, linestrings and polygons
 ##  separate into their respective parts
@@ -436,7 +443,7 @@ linestrings <-  do.call(rbind,lapply(linesswaths,'[[',2))
 bind_rows(swaths %>% mutate(geomtype="polys"),linestrings %>%mutate(geomtype="lines"))%>%
 arrange(kts)%>%
 ggplot()+
-geom_sf(data=ne_countries(country=c("united states of america","mexico","canada"),scale="medium"),fill=NA)+
+geom_sf(data=rnaturalearth::ne_countries(country=c("united states of america","mexico","canada"),scale="medium"),fill=NA)+
 geom_sf(aes(col=kts,fill=kts))+
 scale_color_gradientn(
     colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
@@ -452,6 +459,90 @@ theme_bw()+
 xlim(100,80)+ylim(20,45)
 
 ```
+The maps show the lines and polygons versions of the resulting wind extents. Notice how the extents are quadrant specific. Again, none of these wind extents were provided in the original tabular data, they have been predicted from the models constructed above, mostly based on the provided minimum pressure at each time step. The lower graph singles out one of the time steps around when the storm made landfall in Louisiana on August 17th, 1969. 
+
 ![](README_files/figure-gfm/Camille-linesandpolys.png)<!-- -->
 ![](README_files/figure-gfm/Camille-linesandpolys-landfall.png)<!-- -->
     
+These datasets are now similar to what the National Hurricane Center produces for most modern storms, but not for any storms before 2009. Thus, to provide a consistent set of spatial wind extents for any storm before around 2010, we need to use the tabular information provided by IBTrACS and convert it to spatial information as demonstrated above. 
+
+## Interpolate wind and pressure fields
+
+The above steps only provides us with the extent of different wind speeds in 3-hour increments. We need more fine-grained detailed information on what happens between the different wind extents and between the three hour time steps. To achieve this, we combine linear interpolation with a thin plate spline interpolation and arrive at a much smoother representation of wind fields within the storm.
+
+First read in the same tabular date from IBTrACS and convert the individual center points to lines representing the 3 hour track segments of each storm
+
+``` r
+###  make into lines from points
+###  read in the tabular data
+IBTrACS <- read.csv("ibtracs.ALL.list.v04r01.csv") %>%
+  filter(SEASON==1969,NAME=="CAMILLE")%>%
+  ##  make sure the timestamp is appropriately formatted
+  mutate(ISO_TIME = as.POSIXct(ISO_TIME,tz="GMT"),
+  BASIN=if_else(is.na(BASIN),"NA",BASIN)) %>%
+  ###  turn into point geometry
+  st_as_sf(coords=c("LON","LAT"),crs=4326,remove=FALSE) %>%
+  ###  the lines are two sets of points, so we need to set the leading point and the lagging point
+  mutate(
+    geometry_lead = lead(geometry, default = NULL)
+  ) %>%
+  # drop the NA row created by lagging
+  slice(-n()) %>% 
+  ###  now combine the two sets of points
+  mutate(line = st_sfc(purrr::map2(
+      .x = geometry, 
+      .y = geometry_lead, 
+      .f = ~{st_union(c(.x, .y)) %>% st_cast("LINESTRING")}
+    ))) %>%
+  st_drop_geometry()%>%
+  select(-geometry_lead) %>%
+  rename(geometry="line") %>%
+  st_set_geometry("geometry") %>%
+  st_set_crs(st_crs(4326)) %>% arrange(ISO_TIME)
+
+##  Now get the lines produced earlier and representing the wind extents 
+lne <- linestrings %>%
+  ## make sure the dates coincide
+  filter(date>=min(IBTrACS$ISO_TIME,na.rm=T),date<=max(IBTrACS$ISO_TIME)) %>%
+  arrange(date,kts) %>% 
+  group_by(date) %>%
+  mutate(l = seq(1,n())) %>%
+  ungroup() %>%
+  ##  get the time difference between the start and end of the line segment
+  mutate(dt=as.numeric(difftime(as.POSIXct(date),as.POSIXct(diag(sapply(l, function(n) dplyr::lag(date, n=n))))))) %>%
+  st_transform("+proj=lcc +lat_0=40 +lon_0=-96 +lat_1=20 +lat_2=60 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs +type=crs")
+  
+###  interpolate points along a given track segment
+###  track segments are generally 3 hours in duration
+###  this is too coarse for the raster interpolation
+###  this function provides new points along the line in 3 minute intervals
+###  it assumes the storm is moving at the same speed during the 3 hour segment
+trck_points <- track_interp(IBTrACS) %>%
+    st_transform(st_crs(lne))
+###  get the date stamps of the original track
+###  we will iterate over these
+dts = unique(lne$date)[1:(length(unique(lne$date))-1)]
+
+###  Now the 'meat' of the process is to iterate over each line segment, create end-point rasters of wind speed for the beginning and end of the segment 
+###  using Thin Plate Spline to interpolate between the lines we produced earlier. 
+###  Then linearly interpolate between those end points to get the 3 min interval windspeeds
+###  The TPS interpolation is resource hungry and may be limited on insufficent machines. There are alternatives but those arent discussed here.
+
+###  the non-parallel version, much slower, is
+fields <- sapply(dts,FUN=fields_wrapper,dates=dts,line=lne,track_points=trck_points,oldw=getOption("warn"),track=IBTrACS,parll=F)
+
+### the parallel version
+#library(snowfall)
+#sfInit(parallel=TRUE, cpus=10)#, slaveOutfile=logtmp)
+#sfLibrary(sf)
+#sfLibrary(terra)
+#sfLibrary(dplyr)
+#sfLibrary(fields)
+#sfLibrary("snowfall", character.only=TRUE)
+#sfExport('move_and_interp_snowfall')
+#sfExport('line_int_snowfall')
+#sfExport('comparewinds')
+#sfExport('get_dir')
+fields <- sfLapply(dts,fun=fields_wrapper,dates=dts,line=lne,track_points=trck_points,oldw=getOption("warn"),track=IBTrACS,parll=T)
+
+```
