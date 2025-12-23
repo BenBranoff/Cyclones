@@ -614,8 +614,8 @@ r = rast(ext=ex, resolution=5000,
 ###   Using the original ROCI and eye wall can create extreme and unnatural shifts in wind Velocity with the thin spline method
 ###   to avoid this, bump the 0 velocity line of the ROCI out a bit further
 ###   we will still zero out the original ROCI later, this is only for the thine spline interpolation
-line <- bind_rows(line1,
-                  line1%>%filter(quad=="ROCI")%>%st_cast("POLYGON")%>%st_buffer(.$dist_m_mean*.5) %>%
+line <- bind_rows(line2.2,
+                  line2.2%>%filter(quad=="ROCI")%>%st_cast("POLYGON")%>%st_buffer(.$dist_m_mean*.5) %>%
                       mutate(quad="ROCI2")%>%st_cast("LINESTRING"))
 r <- crop(r,line%>%filter(quad=="ROCI2"))
 ####  remove the eye and the outer storm limits 
@@ -649,12 +649,13 @@ plot(rast(p_v_list))
 plot(rnaturalearth::ne_countries(country=c("united states of america"),scale="medium")%>%st_transform(crs(r)),add=TRUE)
 
 ggplot(as.data.frame(rast(p_v_list),xy=TRUE)%>%tidyr::pivot_longer(cols=c(3:7),names_to="Layer"))+
-geom_raster(aes(x=x,y=y,fill=value),na.rm=TRUE)+
+geom_sf(data=rnaturalearth::ne_countries(country=c("united states of america"),scale="medium")%>%st_transform(crs(r)),fill="grey")+
+geom_raster(aes(x=x,y=y,fill=value))+
 facet_wrap(~Layer)+
 scale_fill_gradientn(
     colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
     values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
-    limits = c(0, 150),
+    limits = c(-2, 150),
     na.value = "transparent",
     name="Maximum Sustained Wind, kts")+
 geom_sf(data=rnaturalearth::ne_countries(country=c("united states of america"),scale="medium")%>%st_transform(crs(r)),fill=NA)+
@@ -665,6 +666,79 @@ xlim(107650,1128130)+ylim(-1629130,-548305)
 
 ```
 ![](README_files/figure-gfm/TPSDemonstration.png)<!-- -->
+
+The above process is carried out for each of the original 3 hour time steps in which wind extent features were produced. However, remember that before doing this, one of a pair of two end points is shifted as described above such that it overlaps its companion endpoint. Thus,each pixel in the two endpoint rasters are then perfectly aligned. In the following steps, we then create empty rasters corresponding to each of the 3 min time steps between the two endpoints and we linearly interpolate their values.
+
+```r
+###  if rs1 and rs2 are the final rasters as produced in the previous step, each belonging to a pair of timestep end points.
+###  extend them so they have the same extents
+rs1 <- extend(rs1,rs2) ##  here rs1 is the TSP wind field for the time step 1969-08-18 6:00:00
+rs2 <- extend(rs2,rs1) ##  here rs2 is the TSP wind field for the time step 1969-08-18 9:00:00
+##  create an empty list for the 3 min time step rasters between the endpoints
+vlist <- list()
+##  set the first layer as the first end point raster
+##  then create new empty rasters for each of the 3 min time steps in between 
+vlist[[1]] <- rs1
+for (i in 2:(length(dates)-1)){
+    vlist[[i]] <- setValues(rs1,NA)
+}
+##  now add in the end raster with known values from the second line segment
+vlist[[length(vlist)+1]] <- rs2
+###  load them to be processed as a raster
+vs <- rast(vlist)
+###  inerpolate (linearly) the missing values between the two end "points"
+##  we assume here that velocity and power transitions are linear from one time point to the next
+##  in this case, its a time difference of usually three hours
+vs <- approximate(vs)
+###  these rasters now hold the interpolated velocity and power values for times between the two end points
+##  but their geographical information is shifted and identical
+##  they now need to be moved to their respective geographic locations
+###  create a new empty list to hold the shifted rasters
+Vlist <- list()
+##  Again, set the first raster to that of the the first set of line segments, which has the correct geographic representation
+##  the second segment will not be included because it is included on the next iteration as the first segment
+##  it was only used here as an endpoint for the approximation
+Vlist[[1]] <- vs[[1]]
+##  for the remaining rasters, shift them in space so they are centered on the points corresponding to their
+##  respective timestamps
+for (i in 2:(length(dates)-1)){
+  d1 <- dates[1]
+  d2 <- dates[i]
+  ###  calculate the dx and dy between the two center points
+  coord_dif <- st_coordinates(trck_points[trck_points$ISO_TIME==d2,])-
+    st_coordinates(trck_points[trck_points$ISO_TIME==d1,])
+  ##  shift the rasters accordingly
+  v <- shift(vs[[i]],coord_dif[1], coord_dif[2])
+  ## add the shifted rasters to the list
+  Vlist[[length(Vlist)+1]] <- v
+}
+
+###  set the geometry back to the original rasters, to ensure all are equal before further processing
+Vlist <- lapply(Vlist, function(x) resample(x,rs1))
+a <- allNA(rast(Vlist))
+Vlist <- ifel(is.na(rast(Vlist)), ifel(a, NA, 0), rast(Vlist))
+##  This is now a list of 60 rasters, each representing a 3 min interval between the two endpoints, which are 3 hours apart
+##  For wind speeds, we are mostly interested in the maximum wind that ocurred over an area for the duration of the storm
+##  so, we take the maximum pixel value throughout the 60 layers
+rV <- app(Vlist,fun=max,na.rm=T)
+ggplot(as.data.frame(rV,xy=TRUE))+
+geom_sf(data=rnaturalearth::ne_countries(country=c("united states of america"),scale="medium")%>%st_transform(crs(r)),fill="grey")+
+geom_raster(aes(x=x,y=y,fill=max))+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(-2, 150),
+    na.value = "transparent",
+    name="Maximum Sustained Wind, kts")+
+geom_sf(data=rnaturalearth::ne_countries(country=c("united states of america"),scale="medium")%>%st_transform(crs(r)),fill=NA)+
+theme_bw()+
+ggtitle("Hurricane Camille Maximum Winds - 1969-08-18 6:00:00 to 9:00:00")+
+xlim(107650,1128130)+ylim(-1629130,-548305)
+
+```
+![](README_files/figure-gfm/Camille-twosteps.png)<!-- -->
+
+
 
 The above results in a series of raster images, as well as a dataframe that compares the resulting raster winds with values from the original lines (as a quality check). The rasters are wrapped, because rasters are kept on disc, not in memory, which does not allow for parallel processing. Wrapping them gets around this. The rasters represent the wind, power, and wind direction at each time stamp that was passed to the function as well as the 3 min interpolated time steps. These are raster stacks, which each layer in each stack representing a different time stamp. 
 
