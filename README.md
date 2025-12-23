@@ -545,11 +545,11 @@ fields <- lapply(dts,FUN=fields_wrapper,dates=dts,line=lne,track_points=trck_poi
 #sfExport('get_dir')
 fields <- sfLapply(dts,fun=fields_wrapper,dates=dts,line=lne,track_points=trck_points,oldw=getOption("warn"),track=IBTrACS,parll=T)
 ```
-Walking through the individual steps behind the fields_wrapper function shows how the final results are constructed. Here, we pick the same time as above, when the storm was at its most intense and close to making landfall. This will show the full range of the interpolation. The function will take the two line segments corresponding to the present time stamp as well as the next one. It then creates a custom coordinate reference system centered on those segments. This helps ensure proper distance calculations and minimizes distortion. It then shifts the second segment to be centered on the first. This allows for linear interpretation once the two end points are calculated. To calculate the end points, the function uses a Thin Plate Spline algorithm with the wind extent linestrings as the input. Here is a summary of the code and a graphical illustration below:
+Walking through the individual steps behind the fields_wrapper function shows how the final results are constructed. Here, we pick the same time as above, when the storm was at its most intense and close to making landfall. This will show the full range of the interpolation. The function will take the two sets of wind extent lines corresponding to the present time stamp as well as the next one. It then creates a custom coordinate reference system centered on those lines. This helps ensure proper distance calculations and minimizes distortion. It then shifts the second set of lines to be centered on the first. This allows for linear interpelation once the two end points are calculated.
 
 ```r
-d1 = as.POSIXct("1969-08-17 12:00:00", tz="GMT")
-d2 = as.POSIXct("1969-08-17 15:00:00", tz="GMT")
+d1 = as.POSIXct("1969-08-18 6:00:00", tz="GMT")
+d2 = as.POSIXct("1969-08-18 9:00:00", tz="GMT")
 line1 <- lne %>% filter(date==d1)
 line2 <- lne %>% filter(date==d2)
 ###  create custom crs centered on current track segment
@@ -594,15 +594,77 @@ limits = c(0, 150))+
 facet_wrap(~source)+
 ggtitle("Line shifting")+
 theme_bw()+
-xlim(347650,1128130)+ylim(-1729130,-948305)
+xlim(107650,1128130)+ylim(-1629130,-548305)
 
 
 ```
 ![](README_files/figure-gfm/line-shifting.png)<!-- -->
 
-In the above graph, you can see the shift of line 2, corresponding to the later date. In this case, the only difference between time 1 and time 2 according to the native tabular data is that the maximum sustained wind at time 1 is 140 knots, while that of time 2 is 138. These 2 knots do not translate to a (rounded) distance difference in the models. Therefore, everything else being equal (remember storms dating this far back have little other information to inform the models), there is no difference between the lines at timestep 1 and those at timestep 2, other than their position. When we shift the time 2 lines back to be centered at time 1, they overlap perfectly.    
+In the above graph, you can see the shift of line 2, corresponding to the later date. In this case, the storm has made landfall and begun to weaken. Its maximum sustained wind falls from 150 to 115 knots, and this is visible in the overlapping sets of lines in the top left panel via the shrinking radius of the wind extents.    
 
+Now, to interpolate at the end points, the function uses a Thin Plate Spline algorithm with the wind extent lines as the input. It does this to the two superimposed (one shifted) set of lines and then uses linear interpolation to calculate the 3 min intervals between the endpoints. When running the TPS, the extreme change around the eye wall (from maximum winds to near 0), as well as the outer extent of the storm (ROCI) can create unnatural spikes. So, we remove those inputs to the TPS and zero them out by cropping in a later step.
 
+```r
+## first, get the extent of the lines and create an empty raster
+## this extent is the largest extent of the storm, as determined by the radius of the last closed isobar (ROCI), which was calculated when the lines were constructed
+ex = trck_points %>% st_buffer(max(lne$dist_m_mean)) %>%ext()
+r = rast(ext=ex, resolution=5000, 
+            crs="+proj=lcc +lat_0=40 +lon_0=-96 +lat_1=20 +lat_2=60 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs +type=crs")
+###
+###   Using the original ROCI and eye wall can create extreme and unnatural shifts in wind Velocity with the thin spline method
+###   to avoid this, bump the 0 velocity line of the ROCI out a bit further
+###   we will still zero out the original ROCI later, this is only for the thine spline interpolation
+line <- bind_rows(line1,
+                  line1%>%filter(quad=="ROCI")%>%st_cast("POLYGON")%>%st_buffer(.$dist_m_mean*.5) %>%
+                      mutate(quad="ROCI2")%>%st_cast("LINESTRING"))
+r <- crop(r,line%>%filter(quad=="ROCI2"))
+####  remove the eye and the outer storm limits 
+###  we can set those to zero later
+###  rasterize the remaining swaths, one for velocity and one for pressure
+rv <-  rasterize(line%>%filter(!line$quad %in%c("ROCI","eye")), r, "kts",touches=T,fun="max")
+###  convert the xyz values to a dataframe for thin spline interpolation
+xyv <- as.data.frame(rv, xy=T,na.rm=F)
+tps_v <- fields::Tps(xyv[,1:2], xyv[,3])
+###  use the model to predict the unknown wind speeds
+p_v <- interpolate(r, tps_v)
+###  for the  purpose of displaying within this vignette, save each raster step
+###  this is not done in the function
+p_v_raw <- p_v
+###  in case the model predicts higher than recorded wind speeds, set them to the maximum known
+p_v[p_v>max(line$kts,na.rm=T)] <- max(line$kts,na.rm=T)
+p_v[p_v<0] <- 0
+p_v_2 <- p_v
+###  now set the outer limits of the storm to 0
+p_v <- mask(p_v,line %>% filter(quad=="ROCI") %>% st_cast("POLYGON"))
+###  and if there is an eye, set it to 0 as well
+if ("eye" %in% unique(line$quad)){
+  p_v <- mask(p_v,line %>% filter(quad=="eye")%>%st_cast("POLYGON"),inverse=T)
+  names(p_v) <- "lyr.1"
+}
+p_v_end <- p_v
+###  again, just for the purpose of this vignette, stack the different step raster for display
+p_v_list <- list(rasterize(line%>%filter(quad!="ROCI2"), r, "kts",touches=T,fun="max"),rv,p_v_raw,p_v_2,p_v_end)
+names(p_v_list) <- c("1. original lines","2. input lines","3. TPS - raw","4. TPS - limited","5. TPS - trimmed & final")
+plot(rast(p_v_list))
+plot(rnaturalearth::ne_countries(country=c("united states of america"),scale="medium")%>%st_transform(crs(r)),add=TRUE)
+
+ggplot(as.data.frame(rast(p_v_list),xy=TRUE)%>%tidyr::pivot_longer(cols=c(3:7),names_to="Layer"))+
+geom_raster(aes(x=x,y=y,fill=value),na.rm=TRUE)+
+facet_wrap(~Layer)+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(0, 150),
+    na.value = "transparent",
+    name="Maximum Sustained Wind, kts")+
+geom_sf(data=rnaturalearth::ne_countries(country=c("united states of america"),scale="medium")%>%st_transform(crs(r)),fill=NA)+
+theme_bw()+
+ggtitle("Hurricane Camille Thin Plate Spline Interpolation - 1969-08-18 6:00:00")+
+theme(legend.position = c(0.9, 0.3))+
+xlim(107650,1128130)+ylim(-1629130,-548305)
+
+```
+![](README_files/figure-gfm/TPSDemonstration.png)<!-- -->
 
 The above results in a series of raster images, as well as a dataframe that compares the resulting raster winds with values from the original lines (as a quality check). The rasters are wrapped, because rasters are kept on disc, not in memory, which does not allow for parallel processing. Wrapping them gets around this. The rasters represent the wind, power, and wind direction at each time stamp that was passed to the function as well as the 3 min interpolated time steps. These are raster stacks, which each layer in each stack representing a different time stamp. 
 
