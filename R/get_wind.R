@@ -1,18 +1,81 @@
 #' @importFrom sf st_coordinates st_as_sfc st_sf st_crs
-#' @importFrom terra rast ext extend approximate setValues shift resample app allNA ifel time
-move_and_interp <- function(L,lines,centers,s_res=5000,methods=NULL){
+#' @importFrom terra rast res ext extend approximate setValues shift resample app allNA ifel time
+get_wind <- function(lines,centers,s_res=5000,methods=NULL){
+  winds <- comps <- list()
+  if ("TPS_int" %in% methods){
+    winds=append(winds,lapply(seq_along(unique(lines$date)),TPS_int,lines, centers, s_res))
+    names(winds)[length(winds)] <- "TPS_int"
+  }
+  if (any(grepl("Willoughby|Boose|Holland",methods))){
+    for (meth in methods[grep("Willoughby|Boose|Holland",methods)]){
+      ###  to convert projected resolution to geo resolution, make a transformed projected template raster
+      rTemp <- rast(ext=lines |> ext(), resolution=s_res,
+                    crs=crs(lines))
+      rTemp <- project(rTemp,"epsg:4326")
+      rTemp <- rast(ext=st_shift_longitude(st_transform(lines,4326))|> ext(), resolution=0.166667,#res(rTemp),
+                    crs=crs(st_shift_longitude(st_transform(lines,4326))))
+      centers <- centers |> left_join(lines |>filter(!quad %in% c("track","track_point"))|>
+                             group_by(date) |>
+                             summarise(name=unique(name),rmw = min(dist_m_min[dist_m_min>0],na.rm=TRUE),maxWind=max(maxWind,na.rm=TRUE),
+                                       minpress=min(minpress,na.rm=TRUE),maxpress=max(maxpress,na.rm=TRUE),
+                                       roci =max(dist_m_mean,na.rm=TRUE),
+                                       geoext=list(st_bbox(st_shift_longitude(st_transform(geometry[quad=="ROCI"],crs(rTemp))))),
+                                       xmin=unlist(geoext)[1],ymin=unlist(geoext)[2],xmax=unlist(geoext)[3],ymax=unlist(geoext)[4])|>
+                             select(-geoext)|>st_drop_geometry(),by=join_by(date)) |>
+        ungroup() |>
+        mutate(name=unique(name[!is.na(name)]),across(c(rmw:ymax),zoo::na.approx),
+               dt=as.numeric(difftime(lead(date),date,units="hours")))|>
+        ###  get the shifted coords necessary for the equation methods
+        st_transform(4326) |>
+        st_shift_longitude()
+      centers$centerX_shifted_geo <- st_coordinates(centers)[,1]
+      centers$centerY_shifted_geo <- st_coordinates(centers)[,2]
+      centers$stormSpeed_geo <- terra::distance(
+        x=vect(cbind(centers$centerX_shifted_geo, centers$centerY_shifted_geo),crs="epsg:4326"),
+        y=vect(cbind(dplyr::lead(centers$centerX_shifted_geo), dplyr::lead(centers$centerY_shifted_geo)),crs="epsg:4326"),
+        pairwise=TRUE) * (0.001 / centers$dt) / 3.6
+      centers <- centers |>
+        mutate(vxDeg_geo=(dplyr::lead(as.numeric(centerX_shifted_geo)) - as.numeric(centerX_shifted_geo)) / dt,
+               vyDeg_geo=(dplyr::lead(as.numeric(centerY_shifted_geo)) - as.numeric(centerY_shifted_geo)) / dt) |>
+        st_transform(crs(rTemp)) |> slice(-n())
+      if (meth=="Boose"){
+        msw <- lapply(seq_along(unique(centers$date)),boose,centers,rTemp)
+      }else if (meth=="Willoughby"){
+        msw <- lapply(seq_along(unique(centers$date)),willoughby,centers,rTemp)
+      } else if (meth=="Holland"){
+        msw <- lapply(seq_along(unique(centers$date)),holland,centers,rTemp)
+      }
+      browser()
+      msw <- do.call(rbind,lapply(msw,'[[',1))
+      compare <- do.call(rbind,lapply(msw,'[[',2))
+      comps <- append(comps,compare)
+      # Applying focal function to smooth results
+      nbgmod <- nls(y ~ SSasymp(x, Asym,R0, lrc),data=data.frame(y=c(59,11,5,3),x=c(1000,4500,9000,20000)))
+      nbg <- predict(nbgmod,newdata=c(x=s_res))
+      msw <- lapply(msw,function(x,y) {y=rast(ext=y |> ext(), resolution=s_res, crs=crs(y));project(x,y)},y=lines)
+      msw <- max(rast(msw), na.rm = TRUE)
+      msw <- terra::focal(msw, w = matrix(1, nbg, nbg), mean, na.rm = TRUE, pad = TRUE)
+      winds=append(winds,msw)
+      names(winds)[length(winds)] <- paste0("MSW_",meth)
+    }
+  }
+  return(list(winds=winds,comps=comps))
+}
+
+
+TPS_int <- function(L,lines,centers,s_res=5000){
   if (L==length(unique(lines$date))){return(NULL)}
   lines$date <- as.POSIXct(lines$date,tz="GMT")
   ###  find the outer bounds of the storm
   outerext<- lines |>filter(quad=="track") |> summarise() |>st_buffer(max(lines$dist_m_mean[linestrings$quad=="ROCI"],na.rm=T),nQuadSegs=2)
   lne <- lines |> filter(quad!="track")
-   #lne <<- lines |>
-    #  arrange(date,kts) |>
-    #  group_by(date) |>
-    #  mutate(l = seq(1,n())) |>
-    # ungroup() |>
-   ##  get the time difference to the next timestep
-    #  mutate(dt=as.numeric(difftime(date,diag(sapply(l, function(n) dplyr::lag(date, n=n))))))
+  #lne <<- lines |>
+  #  arrange(date,kts) |>
+  #  group_by(date) |>
+  #  mutate(l = seq(1,n())) |>
+  # ungroup() |>
+  ##  get the time difference to the next timestep
+  #  mutate(dt=as.numeric(difftime(date,diag(sapply(l, function(n) dplyr::lag(date, n=n))))))
   ###  get the date stamps of the lines
   dts <- unique(lne$date)#[1:(length(unique(lne$date)))]
   d1 <- unique(dts)[L]
@@ -165,7 +228,7 @@ move_and_interp <- function(L,lines,centers,s_res=5000,methods=NULL){
   ####  get the comparison with the shapefile used to construct the windfield
   ####   this is for quality control
   comps <- compare_winds(rasts=V,shape=line1)
-  cat(paste("\rBuilding wind rasters: %",round(100*L/ length(unique(lines$date)),1)))
+  cat(paste("\rCaclulating wind field via Thin Plate Spline: %",round(100*L/ length(unique(lines$date)),1)))
   Sys.sleep(0.01)
   list(Vel=V,Power=P,Dir=D,linecomps=data.frame(comps$lsamps),rastcomps=data.frame(comps$rsamps))
 }

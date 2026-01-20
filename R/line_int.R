@@ -6,27 +6,27 @@ line_int <- function(line,center,ex,s_res){
             crs=crs(line))
   Beta <- 1.0036+0.0173*as.numeric(max(c(line$kts,line$maxWind))+
                                      0.0313*log(min(line$dist_m_mean,na.rm=T))+
-                                     0.0087*st_coordinates(center%>%st_transform((4326)))[,"Y"])
+                                     0.0087*st_coordinates(center|>st_transform((4326)))[,"Y"])
   ##  now the pressure at each swath extent
 
-  line <- line %>% ungroup()%>%
+  line <- line |> ungroup()|>
     mutate(P=minpress+((maxpress-minpress)*exp(-(min(dist_m_mean[kts>0])/dist_m_mean)^Beta)))
 
   ### crop the line to the outer extent of the storm
-  outer=line %>% filter(quad=="ROCI")
+  outer=line |> filter(quad=="ROCI")
   ###   Using the original ROCI can create extreme and unnatural shifts in wind Velocity with the thin spline method
   ###   to avoid this, bump the 0 velocity line out a bit further
   ###  we will still zero out the original ROCI later, this is only for the thine spline interpolation
   line <- bind_rows(line,
-                    st_buffer(outer%>%st_cast("POLYGON"),outer$dist_m_mean*.5) %>%
-                      mutate(quad="ROCI2")%>%st_cast("LINESTRING"))
+                    st_buffer(outer|>st_cast("POLYGON"),outer$dist_m_mean*.5) |>
+                      mutate(quad="ROCI2")|>st_cast("LINESTRING"))
 
-  r <- crop(r,line%>%filter(quad=="ROCI2"))
+  r <- crop(r,line|>filter(quad=="ROCI2"))
   ####  remove the eye and the outer storm limits
   ###  we can set those to zero later
   ###  rasterize the remaining swaths, one for velocity and one for pressure
-  rv <-  rasterize(line%>%filter(!line$quad %in%c("ROCI","eye")), r, "kts",touches=T,fun="max")
-  rP <-  rasterize(line%>%filter(!line$quad %in%c("ROCI","eye")), r, "P",touches=T)
+  rv <-  rasterize(line|>filter(!quad %in%c("ROCI","eye","track","track points")), r, "kts",touches=T,fun="max")
+  rP <-  rasterize(line|>filter(!quad %in%c("ROCI","eye","track","track points")), r, "P",touches=T)
   ###  convert the xyz values to a dataframe for thin spline interpolation
   xyv <- as.data.frame(rv, xy=T,na.rm=F)
   xyP <- as.data.frame(rP, xy=T,na.rm=F)
@@ -55,10 +55,10 @@ line_int <- function(line,center,ex,s_res){
   p_P[p_P>max(line$maxpress,na.rm=T)] <- max(line$maxpress,na.rm=T)
   p_v[p_v<0] <- 0
   ###  now set the outer limits of the storm to 0
-  p_v <- mask(p_v,outer %>% st_cast("POLYGON"))
+  p_v <- mask(p_v,outer |> st_cast("POLYGON"))
   ###  and if there is an eye, set it to 0 as well
   if ("eye" %in% unique(line$quad)){
-    p_v <- mask(p_v,line %>% filter(quad=="eye")%>%st_cast("POLYGON"),inverse=T)
+    p_v <- mask(p_v,line |> filter(quad=="eye")|>st_cast("POLYGON"),inverse=T)
     names(p_v) <- "lyr.1"
   }
   windir <- get_dir(p_v,center)

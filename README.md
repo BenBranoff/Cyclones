@@ -3,9 +3,39 @@ Cyclones Introduction
 Ben Branoff
 2025-03-18
 
-R utilities for modeling and analyzing meteorological cyclones. Fit
-models to observations of storm characteristics and use these models to
-predict and interpolate wind and pressure fields across a storm’s area.
+R utilities for gathering data related to wind, precipitation, and to storm surge from tropical cyclones. 
+\## General work flow
+
+Use the 'get_storms' function to gather the available time series and wind information for a particular storm. If a local data source is available, it can be used, either as the file location or as a pre-loaded dataset. If not, the data will be downloaded from the web.
+
+``` r
+library(Cyclones)
+
+##  storms can be singular or plural and can be identified specifically, or not
+storms <- get_storms(source="hurdat",name="Maria",basin="NA",season=2017)
+storms <- get_storms(source="hurdat",name=c("Maria","IRMA"),basin="NA",season=2017)
+
+##  alternatively, all of the data can be downloaded and filtered later
+storms <- get_storms() |>
+              filter(NAME=="HELENE",SEASON==2024)
+```
+
+With the data loaded, it can now be used to build rasters of wind, precipitation, and/or storm surge. If the Thin Plate Spline (TPS) wind method is desired, we must first build the models for the lookup table. These should be based on as full or limited of a set of storms as necessary for the objective. For generalized modeling, its best to use a full set up storms.
+
+``` r
+
+###  downloading all storms will likely require extending the timeout time
+# options(timeout = 300)
+allstorms <- get_storms(ib_filt="ALL")
+
+mods <- build_models(tracks=allstorms)
+
+
+```
+
+
+
+
 \## Build Wind Models
 <details>
 <summary>

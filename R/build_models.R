@@ -2,7 +2,9 @@
 #' @importFrom tidyr pivot_longer unnest
 #' @importFrom purrr map map2
 #' @importFrom stats dist lm nls predict setNames
-build_models <- function(tracks){
+build_models <- function(tracks=NULL){
+  if (is.null(tracks))
+  tracks <- get_storms(source="ncei",ib_filt=NULL)
   ##  collect wind extent observations from the data
   ##  These are supplied as the extent of 34, 50 and 64 knot sustained wind speeds within each of the 4 cardinal direction quadrants of the storm (NE,SE,SW,NW)
   ##  also, for some storms the maximum wind AND the extent of maximum winds is provided

@@ -1,5 +1,5 @@
-#' @importFrom dplyr last rowwise add_rownames join_by pull
-#' @importFrom sf st_sfc st_point st_transform st_polygon st_linestring st_as_sf st_buffer st_cast st_set_geometry
+#' @importFrom dplyr last rowwise add_rownames join_by pull lead n
+#' @importFrom sf st_sfc st_point st_transform st_polygon st_linestring st_as_sf st_buffer st_cast st_set_geometry st_set_crs st_drop_geometry st_union
 #' @keywords internal
 make_extent <- function(L,mods,tracks){
   tracks <- tracks |>
@@ -274,9 +274,10 @@ make_extent <- function(L,mods,tracks){
     rename(geometry=x) |>
     st_set_geometry("geometry")
   ###  include the track
-
-  track <- tracks |>
-    st_as_sf(coords=c("LON","LAT"),crs=4326,remove=FALSE)|>
+  points <- tracks |>
+    filter(SID==id) |>
+    st_as_sf(coords=c("LON","LAT"),crs=4326,remove=FALSE)
+  track <- points  |>
     mutate(geometry_lead = lead(geometry, default = NULL)) |>
     # drop the NA row created by lagging
     slice(-n()) |>
@@ -291,11 +292,15 @@ make_extent <- function(L,mods,tracks){
     st_set_geometry("geometry")|>
     st_set_crs(4326)|>
     st_transform(custCRSall)|>
-    filter(ISO_TIME==track$ISO_TIME) |>
+    filter(ISO_TIME==date) |>
     mutate(kts=as.numeric(USA_WIND),quad="track",dist_m_mean=0,dist_m_min=0,source="native",ID=id,name=name,date=date,maxWind=as.numeric(USA_WIND),minpress=as.numeric(USA_PRES),
            maxpress=as.numeric(USA_POCI),centerX=X,centerY=Y)|>
     select(kts,quad,dist_m_mean,dist_m_min,source,ID,name,date,maxWind,minpress,maxpress,centerX,centerY)
-  linestrings <- bind_rows(linestrings,track)
+   point <- st_transform(points,custCRSall) |>filter(ISO_TIME==date)|>
+    mutate(kts=as.numeric(USA_WIND),quad="track points",dist_m_mean=0,dist_m_min=0,source="native",ID=id,name=name,date=date,maxWind=as.numeric(USA_WIND),minpress=as.numeric(USA_PRES),
+           maxpress=as.numeric(USA_POCI),centerX=X,centerY=Y)|>
+    select(kts,quad,dist_m_mean,dist_m_min,source,ID,name,date,maxWind,minpress,maxpress,centerX,centerY)
+  linestrings <- bind_rows(linestrings,track,point)
   cat(paste("\rBuilding Wind Extents: %",round(100*L/nrow(tracks),1)))
   return(c(swaths=list(swaths),linestrings=list(linestrings)))
 }
