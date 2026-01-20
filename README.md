@@ -1,10 +1,10 @@
 Cyclones Introduction
 ================
 Ben Branoff
-2025-03-18
+2026-01-20
 
-R utilities for gathering data related to wind, precipitation, and to storm surge from tropical cyclones. 
-\## General work flow
+R utilities for gathering data related to wind, precipitation, and storm surge from tropical cyclones. 
+## General work flow
 
 Use the 'get_storms' function to gather the available time series and wind information for a particular storm. If a local data source is available, it can be used, either as the file location or as a pre-loaded dataset. If not, the data will be downloaded from the web.
 
@@ -33,13 +33,10 @@ mods <- build_models(tracks=allstorms)
 
 ```
 
-
-
-
-\## Build Wind Models
+## Build Wind Models
 <details>
 <summary>
-\## Read in and parse previous cyclone data
+## Read in and parse previous cyclone data
 </summary>
 
 Start with the IBTrACS data (updated data available at:
