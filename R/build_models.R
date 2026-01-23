@@ -1,43 +1,43 @@
-#' @importFrom dplyr select mutate rename filter bind_rows if_else across group_by ungroup summarise nest_by reframe distinct group_nest left_join
+#' @importFrom dplyr select mutate rename filter bind_rows if_else across group_by ungroup summarise nest_by reframe distinct group_nest left_join cur_data
 #' @importFrom tidyr pivot_longer unnest
-#' @importFrom purrr map map2
+#' @importFrom purrr map map2 safely
 #' @importFrom stats dist lm nls predict setNames
 build_models <- function(tracks=NULL){
-  if (is.null(tracks))
-  tracks <- get_storms(source="ncei",ib_filt=NULL)
+  if (is.null(tracks)) stop("No data supplied")#;tracks <- get_storms(source="ncei",ib_filt=NULL)
   ##  collect wind extent observations from the data
   ##  These are supplied as the extent of 34, 50 and 64 knot sustained wind speeds within each of the 4 cardinal direction quadrants of the storm (NE,SE,SW,NW)
   ##  also, for some storms the maximum wind AND the extent of maximum winds is provided
   quaddist <- bind_rows(
-    tracks |>
+    tracks |> unnest(data)|>
       ####  these columns describe the extent of 34,50 and 64 knot winds in each of the storms quadrant
       ####  at different timesteps
       select(BASIN,USA_R34_NE,USA_R34_SE,USA_R34_NW,USA_R34_SW,
              USA_R50_NE,USA_R50_SE,USA_R50_NW,USA_R50_SW,
              USA_R64_NE,USA_R64_SE,USA_R64_NW,USA_R64_SW,
              ###  these are identifiers and more variables important for additional models
-             SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,USA_WIND,USA_PRES,USA_ROCI,USA_POCI,USA_PRES,BASIN) |>
+             SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,REUNION_RMW,BOM_RMW,USA_WIND,USA_PRES,USA_ROCI,USA_POCI,USA_PRES,BASIN) |>
       pivot_longer(cols=c(USA_R34_NE,USA_R34_SE,USA_R34_NW,USA_R34_SW,
                                  USA_R50_NE,USA_R50_SE,USA_R50_NW,USA_R50_SW,
                                  USA_R64_NE,USA_R64_SE,USA_R64_NW,USA_R64_SW),
                           names_to =c("speed","quad"),
                           names_pattern = "USA_R(.*)_(.*)",values_to="dist") |>
-      mutate(speed=as.numeric(speed),
+      mutate(across(c(dist,speed,USA_RMW,REUNION_RMW,BOM_RMW),as.numeric),
              source="swaths"),
-    tracks |>
-      select(BASIN,SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,USA_WIND,USA_PRES,USA_ROCI,USA_POCI,USA_PRES,BASIN) |>
+    tracks |> unnest(data) |>
+      select(BASIN,SID,ISO_TIME,USA_SSHS,USA_EYE,USA_RMW,USA_WIND,REUNION_RMW,BOM_RMW,USA_PRES,USA_ROCI,USA_POCI,USA_PRES,BASIN) |>
       ###  there are also two columns that describe the maximum wind speed and its maximum distance in the storm
       ###  this is not provided for each quadrant and so is assumed to be circular and symmetric
       mutate(quad=list(c("NE","SE","SW","NW")),
              speed=as.numeric(USA_WIND),
              source="RMW") |>
       select(-USA_WIND) |>
-      unnest(quad) |>
-      rename(dist=USA_RMW)) |>
+      unnest(quad) |>mutate(across(c(USA_RMW,REUNION_RMW,BOM_RMW),as.numeric)) |>
+      mutate(dist=rowMeans(cur_data()[,c("USA_RMW","REUNION_RMW","BOM_RMW")],na.rm=TRUE))) |>
     mutate(across(c(dist, speed,USA_EYE,USA_ROCI,USA_POCI,USA_PRES,USA_SSHS), ~as.numeric(.)),
            USA_SSHS_lab = paste("Category ",USA_SSHS),
-           BASIN=if_else(is.na(BASIN),"NA",BASIN)) |>
-    filter(dist>0)
+           BASIN=if_else(is.na(BASIN),"NA",BASIN),
+           quad=factor(quad)) |>
+    filter(dist>0,!is.na(speed))
   ############################################################
   #######   create models needed later
   ######    We need these to reconstruct maximum wind extents from given data
@@ -46,28 +46,33 @@ build_models <- function(tracks=NULL){
   ###  in general, the SW quadrant has higher winds closer to the center, and the NE quadrant has the same wind speeds farther out
   ###  storm size also seems to be important
   ###  Asymptotic models by storm size and quadrant
-  modquad <- lm(data=quaddist|>filter(USA_SSHS>=1),dist~log(speed):(quad*BASIN))
-  modquad_asymp <- nls(dist ~ SSasymp(speed, Asym,R0, lrc), data = quaddist|> filter(USA_SSHS>=1),control = list(maxiter = 500))
+  ###  general form of the models: In the following steps, these are done for specific subsets of data
+  #modquad <- lm(data=quaddist|>filter(USA_SSHS>=1),dist~log(speed):(quad*BASIN))
+  #modquad_asymp <- nls(dist ~ SSasymp(speed, Asym,R0, lrc), data = quaddist|> filter(USA_SSHS>=1),control = list(maxiter = 500))
   ###  try the model grouped by storm size (saffir simpson)
   ###  create a new dataset to predict from the model, with all possibilities of wind speed
-  ##  create new dataset with all wind speeds present for each storm size and quadrant
+  ###  create a 'safe' version of nls that will return NA instead of aborting
+  nls_safe <- safely(nls,otherwise=NA)
+  lm_safe <- safely(lm,otherwise=NA)
+  ###  catch the missing models before predicting
+  predict_safe <- function(mod,dat) if(length(mod)==1) return(NA) else(predict(mod,newdata=dat))
   quaddist_new <- quaddist |>
-    filter(USA_SSHS>=1,BASIN!="SA")|>
+    filter(USA_SSHS>=1)|>
     distinct(USA_SSHS,quad,BASIN)|>
     group_by(USA_SSHS,quad,BASIN) |>
     reframe(speed=1:185)|>
     nest_by(USA_SSHS,quad,BASIN)
   ##  build models on the original data, nested by both size, quadrant, and BASIN
   modquads <- quaddist|> filter(USA_SSHS>=1) |>
-    group_nest(USA_SSHS,quad,BASIN) |>
-    ## south atlantic has too few storms
-    filter(BASIN!="SA")|>
-    mutate(data2=quaddist_new$data,  ###  predict fitted models onto the new dataset with the full range of windspeeds
-           model_asymp = map(data,~nls(dist ~ SSasymp(speed, Asym,R0, lrc), data = .,control = list(maxiter = 500))),
-           model_lm = map(data,~lm(dist ~log(speed), data = .)),
-           pred_asymp=map2(model_asymp,data2,predict),
-           pred_lm=map2(model_lm,data2,predict))
+      group_nest(USA_SSHS,quad,BASIN) |>
+      mutate(data2=quaddist_new$data,  ###  predict fitted models onto the new dataset with the full range of windspeeds. use the $result component of the _safe methods
+           model_asymp = map(data,~nls_safe(dist ~ SSasymp(speed, Asym,R0, lrc), data = .,control = list(maxiter = 500))$result),
+           model_lm = map(data,~lm_safe(dist ~log(speed), data = .)$result),
+           ## add conditionals if the safe models return NA
+           pred_asymp=map2(model_asymp,data2,predict_safe),
+           pred_lm=map2(model_lm,data2,predict_safe))
   ### take the predicted and original values to plot with
+  if (any(is.na(modquads$model_asymp))) warning("Empty models for some Basin:Category:Quadrant groups. Insuffucient data the likely cause for those groups.")
   modquad_df <- modquads |>
     select(-c(data,model_asymp,model_lm)) |>
     unnest(c(data2,pred_asymp,pred_lm)) |>

@@ -1,6 +1,5 @@
 #' @importFrom terra time
 willoughby <- function(L,cens,tmpRas) {
-
   cent <- cens |> slice(L)
   tmpRas <- crop(tmpRas,ext(unlist(st_drop_geometry(cent[,c('xmin','xmax','ymin','ymax')]))))
   msw = round(cent$maxWind/1.94384)
@@ -33,8 +32,8 @@ willoughby <- function(L,cens,tmpRas) {
   tmpRasA$wind <- round(tmpRasA$wind,3)
   terra::values(tmpRas) <- tmpRasA$wind
   terra::time(tmpRas) <- cent$date
-  comps <- compare_winds(rasts=tmpRas,shape=data.frame(name=cent$name,date=cent$date))
-  comps$rsource="Willoughby"
+  #comps <- compare_winds(rasts=tmpRas,shape=data.frame(name=cent$name,date=cent$date))
+  #comps$rsource="Willoughby"
   cat(paste0("\rCalculating Willoughby wind field: %",round(100*L/nrow(cens),1)))
-  return(list(rasters=tmpRas,comps=comps))
+  return(tmpRas)
 }

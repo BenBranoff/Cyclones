@@ -42,7 +42,7 @@ get_sondes <-  function(storm,ddir=NULL){
     }
   }
   if (length(fls)==0) lnks <- tryURL(storm) else lnks<-gsub(paste0(storm,"_"),"",fls)
-  if (length(lnks)==1){ cat("No Sonde data detected for this storm");return(FALSE)}
+  if (length(lnks)==1){ cat("\rNo Sonde data detected for this storm");return(FALSE)}
   sondedata <- lapply(seq_along(lnks),function(x,lnks,trtry,dd,st){
     if (is.null(dd)) tf <- tempfile() else tf=paste0(dd,"/",st,"_",basename(lnks[x]))
     if (!file.exists(tf)) trtry(lnks[x],tf,maxcount=3)
@@ -68,6 +68,7 @@ get_sondes <-  function(storm,ddir=NULL){
   },lnks=lnks,trtry=try_retry,dd=ddir,st=storm)
   sondedata <- do.call(rbind,sondedata)
   sondedata <- sondedata|>
+    mutate(storm=storm) |>
     filter(LAT.N != -999,WS.ms!=-999,Z.m!=-999)|>
     sf::st_as_sf(coords=c("LON.E","LAT.N"),crs=4326)
   if (created) saveRDS(sondedata, donefile)

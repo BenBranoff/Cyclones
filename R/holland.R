@@ -32,8 +32,8 @@ holland <- function(L, cens,tmpRas) {
   tmpRasA$wind <- round(tmpRasA$wind,3)
   terra::values(tmpRas) <- tmpRasA$wind
   terra::time(tmpRas) <- cent$date
-  comps <- compare_winds(rasts=tmpRas,shape=data.frame(name=cent$name,date=cent$date))
-  comps$rsource="Holland"
+  #comps <- compare_winds(rasts=tmpRas,shape=data.frame(name=cent$name,date=cent$date))
+  #comps$rsource="Holland"
   cat(paste0("\rCalculating Holland wind field: %",round(100*L/nrow(cens),1)))
-  return(list(rasters=tmpRas,comps=comps))
+  return(tmpRas)
 }

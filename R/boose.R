@@ -43,8 +43,9 @@ boose <- function(L,cens,tmpRas) {
   dist <- sqrt(x * x + y * y)
   vr[dist > 2.5] <- NA
   terra::values(tmpRas) <- vr
-  comps <- compare_winds(rasts=tmpRas,shape=data.frame(name=cent$name,date=cent$date,meth="Boose"))
-  if (!is.null(comps$rsamps)) comps$rsource="Boose"
+  terra::time(tmpRas) <- cent$date
+  #comps <- compare_winds(rasts=tmpRas,shape=data.frame(name=cent$name,date=cent$date,meth="Boose"))
+  #if (!is.null(comps$rsamps)) comps$rsource="Boose"
   cat(paste0("\rCalculating Boose wind field: %",round(100*L/nrow(cens),1)))
-  return(list(rasters=tmpRas,comps=comps))
+  return(tmpRas)
 }

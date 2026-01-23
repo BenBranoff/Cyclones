@@ -1,4 +1,4 @@
-#' @importFrom dplyr filter mutate any_of select pull slice
+#' @importFrom dplyr filter mutate any_of select pull slice group_split syms coalesce group_keys
 get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib_filt=NULL){
   tmf <- tempfile()
   if (is.data.frame(source)){
@@ -23,6 +23,7 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
       tryCatch({
         # Attempt to download the file
         download.file(URL,paste0(tmf,".csv"))
+        dat = read.csv(paste0(tmf,".csv"))
         message("Download successful!")
       },
       error = function(e) {
@@ -37,14 +38,13 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
         invisible(NULL)
       },
       warning = function(w) {
-        if (grepl("Timeout", w$message, ignore.case = TRUE)) {
-          stop("Download timeout reached. Please check your internet connection or increase the R timeout option. Alernatively, download and source data directly from browser.")
+        if (grepl("Timeout|!= reported length", w$message, ignore.case = TRUE)) {
+          stop("Download timeout reached. Please check your internet connection or increase the R timeout option. Alternatively, download and source data directly from browser.")
         }else{
           # Handle other warnings, such as "downloaded length != reported length"
           message(paste("A warning occurred during download:", w$message))
         }
       })
-      dat = read.csv(paste0(tmf,".csv"))
       ##  HURDAT
     }else if (source=="hurdat"){
       if (is.null(basin))  stop("Basin not specified. HURDAT available for North Atlantic 'NA' and 'EP' basins.")
@@ -61,6 +61,7 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
       tryCatch({
         # Attempt to download the file
         download.file(url,paste0(tmf,".txt"))
+        hurdat <- readLines(paste0(tmf,".txt"))
         message("Download successful!")
       },
       error = function(e) {
@@ -82,7 +83,6 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
           message(paste("A warning occurred during download:", w$message))
         }
       })
-      hurdat <- readLines(paste0(tmf,".txt"))
       start <- grep("<body>",head(hurdat)) +2
       hurdat <- hurdat[start:length(hurdat)]
       ls <- lengths(strsplit(hurdat,","))
@@ -118,7 +118,7 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
                   "USA_R34_NE", "USA_R34_SE","USA_R34_SW","USA_R34_NW",
                   "USA_R50_NE", "USA_R50_SE","USA_R50_SW","USA_R50_NW",
                   "USA_R64_NE", "USA_R64_SE","USA_R64_SW","USA_R64_NW",
-           "USA_ROCI","USA_POCI","USA_RMW","USA_EYE","STORM_SPEED"))) |>
+           "USA_ROCI","USA_POCI","USA_RMW","REUNION_RMW","BOM_RMW","USA_EYE","STORM_SPEED"))) |>
     mutate(ISO_TIME=as.POSIXct(ISO_TIME,tz="UTC"),
            BASIN=if_else(is.na(BASIN),"NA",BASIN))
   if (!is.null(basin)){
@@ -146,6 +146,16 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
     else
       stop("Provided id value not found in data. Check source and other filters. HURDAT uses the USA_ATCFID while IBTrACS uses either USA_ATCFID or SID.")
   }
+  dat <- dat |>
+    mutate(ID=coalesce(!!!syms(intersect(c("SID","USA_ATCF_ID"),names(dat)))),
+           ID=paste(NAME,SEASON,BASIN,ID, sep="_")) |>
+    tidyr::nest(.by =ID)
+  names(dat$data) <- dat$ID
+  #ids <- dat |>
+  #  group_keys() |>
+  #  pull(ID)
+  #dat <- dat |> group_split() |>
+  #  setNames(ids)
   return(dat)
 }
 

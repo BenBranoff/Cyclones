@@ -3,7 +3,7 @@ Cyclones Introduction
 Ben Branoff
 2026-01-20
 
-R utilities for gathering data related to wind, precipitation, and storm surge from tropical cyclones. 
+R utilities for producing gridded representations of tropical cyclone wind, precipitation, and storm surge. 
 ## General work flow
 
 Use the 'get_storms' function to gather the available time series and wind information for a particular storm. If a local data source is available, it can be used, either as the file location or as a pre-loaded dataset. If not, the data will be downloaded from the web.
@@ -14,24 +14,79 @@ library(Cyclones)
 ##  storms can be singular or plural and can be identified specifically, or not
 storms <- get_storms(source="hurdat",name="Maria",basin="NA",season=2017)
 storms <- get_storms(source="hurdat",name=c("Maria","IRMA"),basin="NA",season=2017)
+names(storms)
 
 ##  alternatively, all of the data can be downloaded and filtered later
-storms <- get_storms() |>
-              filter(NAME=="HELENE",SEASON==2024)
+##  downloading all storms will likely require extending the timeout time
+##  options(timeout = 300)
+allstorms <- get_storms(ib_filt="ALL")
+storms <- allstorms |>
+              slice(grep("HELENE_2024|MILTON_2024",ID))
 ```
-
-With the data loaded, it can now be used to build rasters of wind, precipitation, and/or storm surge. If the Thin Plate Spline (TPS) wind method is desired, we must first build the models for the lookup table. These should be based on as full or limited of a set of storms as necessary for the objective. For generalized modeling, its best to use a full set up storms.
+With the data loaded, it can now be used to build rasters of wind, precipitation, and/or storm surge, as well as a combined Tropical Cyclone Severity Scale (TCSS) (Bloemendale et al. (2021)). If the Thin Plate Spline (TPS) wind method is desired, models are built into a lookup table (The empirical TPS method is shown below to be more accurate than the theoretical models). These lookup tables should be based on as full or limited a set of storms as necessary for the objective. For generalized modeling, its best to use a full set of storms.
 
 ``` r
-
-###  downloading all storms will likely require extending the timeout time
-# options(timeout = 300)
-allstorms <- get_storms(ib_filt="ALL")
-
+## build the models based on the entire storm dataset.  The models are built into lookup tables, with a different model for every quadrant of the storm, for every storm size and in every basin. 
 mods <- build_models(tracks=allstorms)
+
+```
+These models will allow the reconstruction of certain wind extents when missing, which is often the case for older (pre 2018) storms. Again, if generalized wind fields are desired, the other non-TPS methods can be used as explained further below. But if the objective is to create wind field predictions specific to each quadrant and each basin and each storm category based on the other storms in the data, we use these models.
+
+``` r
+##  generate linestring and polygon wind extent features for each timestep in each storm
+##  when used as shown below with multiple storms as an input, the functions will only perform the action on the first storm
+windextents <- make_extent(storms,mods=mods)
+
+##  To apply the function to all storms, use lapply or a parallel equivalent (snowfall::sfLapply)
+windextents <- lapply(storms$data,make_extent, mods=mods)
+
+##  The linestrings and polygons are stored separately and can be pulled out accordingly
+linestrings <- lapply(windextents,function(x) x[x$extent_type=="linestrings",])
+##  the individual storms are projected in their own crs, centered on the storm. To get them all in the same CRS, if desired
+linestrings <- lapply(linestrings,st_transform,crs=4326)
+
+polygons <- lapply(windextents,function(x) x[x$extent_type=="polygons",])
 
 
 ```
+```{r, echo=false}
+library(ggplot2)
+
+ggplot(do.call(rbind,linestrings))+
+geom_sf(data=rnaturalearth::ne_countries(scale="medium"))+
+geom_sf(aes(col=kts,fill=kts))+
+scale_color_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(0, 150))+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+limits = c(0, 150))+
+facet_wrap(~ID)+
+ggtitle("Hurricanes Helene and Milton wind extents")+
+theme_bw()+
+xlim(-100,-75)+ylim(15,45)
+
+ggplot(do.call(rbind,linestrings)|>filter(kts>=64))+
+geom_sf(data=rnaturalearth::ne_countries(scale="medium"))+
+geom_sf(aes(col=kts,fill=kts))+
+scale_color_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(0, 150))+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+limits = c(0, 150))+
+facet_wrap(~ID)+
+ggtitle("Hurricanes Helene and Milton wind extents - Cat 1+")+
+theme_bw()+
+xlim(-93,-78)+ylim(20,35)
+
+```
+
+
 
 ## Build Wind Models
 <details>

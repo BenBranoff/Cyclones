@@ -4,13 +4,15 @@ line_int <- function(line,center,ex,s_res){
   ###  create empty raster, with the extent of the current wind field
   r <- rast(ext=ex, resolution=s_res,
             crs=crs(line))
-  Beta <- 1.0036+0.0173*as.numeric(max(c(line$kts,line$maxWind))+
+  line <- line |> filter(!quad %in% c("track","track points"))
+
+  Beta <- 1.0036+0.0173*as.numeric(max(c(line$kts,line$maxWind),na.rm=TRUE)+
                                      0.0313*log(min(line$dist_m_mean,na.rm=T))+
                                      0.0087*st_coordinates(center|>st_transform((4326)))[,"Y"])
   ##  now the pressure at each swath extent
 
   line <- line |> ungroup()|>
-    mutate(P=minpress+((maxpress-minpress)*exp(-(min(dist_m_mean[kts>0])/dist_m_mean)^Beta)))
+    mutate(P=minpress+((maxpress-minpress)*exp(-(min(dist_m_mean[kts>0],na.rm=TRUE)/dist_m_mean)^Beta)))
 
   ### crop the line to the outer extent of the storm
   outer=line |> filter(quad=="ROCI")
@@ -25,6 +27,7 @@ line_int <- function(line,center,ex,s_res){
   ####  remove the eye and the outer storm limits
   ###  we can set those to zero later
   ###  rasterize the remaining swaths, one for velocity and one for pressure
+
   rv <-  rasterize(line|>filter(!quad %in%c("ROCI","eye","track","track points")), r, "kts",touches=T,fun="max")
   rP <-  rasterize(line|>filter(!quad %in%c("ROCI","eye","track","track points")), r, "P",touches=T)
   ###  convert the xyz values to a dataframe for thin spline interpolation
