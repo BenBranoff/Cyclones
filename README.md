@@ -3,8 +3,6 @@ Cyclones
 Ben Branoff
 January 23, 2026
 
-Ben Branoff 2026-01-20
-
 R utilities for producing gridded representations of tropical cyclone
 wind, precipitation, and storm surge.
 
@@ -46,10 +44,6 @@ storms.
 mods <- build_models(tracks=allstorms)
 ```
 
-    ## Warning in build_models(tracks = allstorms): Empty models for some
-    ## Basin:Category:Quadrant groups. Insuffucient data the likely cause for those
-    ## groups.
-
 These models will allow the reconstruction of certain wind extents when
 missing, which is often the case for older (pre 2018) storms. Again, if
 generalized wind fields are desired, the other non-TPS methods can be
@@ -63,18 +57,6 @@ models.
 ##  when used as shown below with multiple storms as an input, the functions will only perform the action on the first storm
 windextents <- make_extent(storms,mods=mods)
 ```
-
-    ## Warning in make_extent(storms, mods = mods): More than one storm in data. Only
-    ## first will be used. Use lapply or a parallel equivalent over the .$data to
-    ## repeat for multiple storms.
-
-    ## Warning: `add_rownames()` was deprecated in dplyr 1.0.0.
-    ## ℹ Please use `tibble::rownames_to_column()` instead.
-    ## ℹ The deprecated feature was likely used in the Cyclones package.
-    ##   Please report the issue at <https://github.com/BenBranoff/Cyclones/issues>.
-    ## This warning is displayed once every 8 hours.
-    ## Call `lifecycle::last_lifecycle_warnings()` to see where this warning was
-    ## generated.
 
     ## Building Wind Extents: % 2.2Building Wind Extents: % 4.4Building Wind Extents: % 6.7Building Wind Extents: % 8.9Building Wind Extents: % 11.1Building Wind Extents: % 13.3Building Wind Extents: % 15.6Building Wind Extents: % 17.8Building Wind Extents: % 20Building Wind Extents: % 22.2Building Wind Extents: % 24.4Building Wind Extents: % 26.7Building Wind Extents: % 28.9Building Wind Extents: % 31.1Building Wind Extents: % 33.3Building Wind Extents: % 35.6Building Wind Extents: % 37.8Building Wind Extents: % 40Building Wind Extents: % 42.2Building Wind Extents: % 44.4Building Wind Extents: % 46.7Building Wind Extents: % 48.9Building Wind Extents: % 51.1Building Wind Extents: % 53.3Building Wind Extents: % 55.6Building Wind Extents: % 57.8Building Wind Extents: % 60Building Wind Extents: % 62.2Building Wind Extents: % 64.4Building Wind Extents: % 66.7Building Wind Extents: % 68.9Building Wind Extents: % 71.1Building Wind Extents: % 73.3Building Wind Extents: % 75.6Building Wind Extents: % 77.8Building Wind Extents: % 80Building Wind Extents: % 82.2Building Wind Extents: % 84.4Building Wind Extents: % 86.7Building Wind Extents: % 88.9Building Wind Extents: % 91.1Building Wind Extents: % 93.3Building Wind Extents: % 95.6Building Wind Extents: % 97.8Building Wind Extents: % 100
 

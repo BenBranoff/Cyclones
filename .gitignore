@@ -4,3 +4,10 @@
 .httr-oauth
 .DS_Store
 .quarto
+.gitignore
+.Rbuildignore
+DESCRIPTION
+NAMESPACE
+README.md
+README.rmd
+README_files
