@@ -129,7 +129,7 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
   }
   if (!is.null(season)){
     if (as.numeric(season) %in% seq(1851,format(Sys.time(),"%Y")))
-      dat <- dat |> filter(as.numeric(season) %in% SEASON)
+      dat <- dat |> filter(as.numeric(SEASON) %in% as.numeric(season))
     else
       stop("Provided season value not found in data. Check source and other filters.")
   }
@@ -149,8 +149,11 @@ get_storms <- function(source="ncei",id=NULL,name=NULL,season=NULL,basin=NULL,ib
   dat <- dat |>
     mutate(ID=coalesce(!!!syms(intersect(c("SID","USA_ATCF_ID"),names(dat)))),
            ID=paste(NAME,SEASON,BASIN,ID, sep="_")) |>
-    tidyr::nest(.by =ID)
-  names(dat$data) <- dat$ID
+    #tidyr::nest(.by =ID)
+    group_by(ID)
+  IDs <- group_keys(dat)|>pull(ID)
+  dat <- dat |>group_split()
+  names(dat) <- IDs
   #ids <- dat |>
   #  group_keys() |>
   #  pull(ID)

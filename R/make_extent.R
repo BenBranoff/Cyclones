@@ -1,23 +1,15 @@
-#' @importFrom dplyr last rowwise add_rownames join_by pull lead n
+#' @importFrom dplyr last rowwise join_by pull lead n
 #' @importFrom sf st_sfc st_point st_transform st_polygon st_linestring st_as_sf st_buffer st_cast st_set_geometry st_set_crs st_drop_geometry st_union
 #' @keywords internal
-make_extent <- function(tracks,mods){
-  options(warn = -1)
-  if (length(unique(tracks$ID))>1||length(unique(tracks$SID))>1||length(unique(tracks$USA_ATCF_ID))>1){
-    options(warn = 1)
-    warning("More than one storm in data. Only first will be used. Use lapply or a parallel equivalent over the .$data to repeat for multiple storms.")
-    if ("ID" %in% names(tracks))    tracks <- tracks[1,] |>unnest(data)
-    else if ("SID" %in% names(tracks))    tracks <- tracks |> filter(SID==unique(SID)[1])
-    else if ("USA_ATCF_ID" %in% names(tracks))    tracks <- tracks |> filter(USA_ATCF_ID==unique(USA_ATCF_ID)[1])
-    else stop("Unknown ID in data, unable to distringuish individual storms")
-  } else if (nrow(tracks)==1){  ##  for a one storm nested list
-    tracks <- tracks |> unnest(data)
-  }
+make_extent <- function(tracks,mods,type="linestrings"){
+  if (!"linestrings"%in% type&(!"polygons" %in% type)&(!"all" %in% type)) stop("geometry return type unknown")
+  tracks <- checktracks(tracks)
+
   tracks <- tracks |>
     mutate(ISO_TIME =as.POSIXct(ISO_TIME,format="%Y-%m-%d %H:%M:%S",tz="GMT"),
            MONTH  = format(ISO_TIME,"%m"))
+  options(warn = 0)
   track <- lapply(1:nrow(tracks),function(L,trs,m){
-    options(warn = 0)
     tr <- trs |> slice(L)
     options(dplyr.summarise.inform = FALSE)
     mod <- m$modquads
@@ -25,7 +17,7 @@ make_extent <- function(tracks,mods){
     pocimod <- m$pocimod
     rocimod <- m$rocimod
     minpresss <- m$minpress
-    id=ifelse("SID" %in% names(tr),tr$SID,tr$USA_ATCF_ID)
+    id=unique(tr$ID)
     name=tr$NAME
     year=tr$SEASON
     date <- tr$ISO_TIME
@@ -250,7 +242,7 @@ make_extent <- function(tracks,mods){
                 dist_m_min = min(dist_m)) |>
       ungroup() |>
       st_cast()|>
-      left_join(data.frame(source=swathmodeled) |> add_rownames("quadspeed")|>rowwise()|>mutate(quad=substr(quadspeed,1,2),kts=gsub(quad,"",quadspeed)|>as.numeric()),
+      left_join(data.frame(source=swathmodeled) |> tibble::rownames_to_column("quadspeed")|>rowwise()|>mutate(quad=substr(quadspeed,1,2),kts=gsub(quad,"",quadspeed)|>as.numeric()),
                 by=join_by(quad,kts)) |>
       rowwise() |>
       mutate(source=if_else(!is.na(maxwinddist)&kts==maxwind,"native",if_else(is.na(source)|source==0,"modeled","native")))|>
@@ -260,7 +252,7 @@ make_extent <- function(tracks,mods){
                                       summarise(dist_m_mean = mean(dist_m),
                                                 dist_m_min = min(dist_m)) |>
                                       st_cast()|>
-                                      left_join(data.frame(source=swathmodeled) |> add_rownames("quadspeed")|>rowwise()|>mutate(quad=substr(quadspeed,1,2),kts=gsub(quad,"",quadspeed)|>as.numeric()),
+                                      left_join(data.frame(source=swathmodeled) |> tibble::rownames_to_column("quadspeed")|>rowwise()|>mutate(quad=substr(quadspeed,1,2),kts=gsub(quad,"",quadspeed)|>as.numeric()),
                                                 by=join_by(quad,kts)) |>
                                       rowwise() |>
                                       mutate(source=if_else(!is.na(maxwinddist)&kts==maxwind,"native",if_else(is.na(source)|source==0,"modeled","native")))|>
@@ -288,7 +280,7 @@ make_extent <- function(tracks,mods){
       st_set_geometry("geometry")
     ###  include the track
     points <- trs |>
-      filter(SID==id) |>
+      #filter(SID==id) |>
       st_as_sf(coords=c("LON","LAT"),crs=4326,remove=FALSE)
     tr <- points  |>
       mutate(geometry_lead = lead(geometry, default = NULL)) |>
@@ -316,12 +308,14 @@ make_extent <- function(tracks,mods){
              maxpress=as.numeric(USA_POCI),centerX=X,centerY=Y)|>
       select(kts,quad,dist_m_mean,dist_m_min,source,ID,name,date,maxWind,minpress,maxpress,centerX,centerY)
     linestrings <- bind_rows(linestrings,tr,point)
-    cat(paste("\rBuilding Wind Extents: %",round(100*L/nrow(trs),1)))
+    cat(paste("\rBuilding wind extents for ",unique(linestrings$ID)," : %",round(100*L/nrow(trs),1)))
     return(c(swaths=list(swaths),linestrings=list(linestrings)))
   },m=mods,trs=tracks)
   swaths <- do.call(rbind,lapply(track,'[[',1)) |>mutate(extent_type="polygons")
   linestrings <-  do.call(rbind,lapply(track,'[[',2)) |>mutate(extent_type="linestrings")
-  extents <- rbind(swaths,linestrings) #|> tidyr::nest(.by =ID)
+  if (("linestrings" %in% type)&length(type==1)) extents=linestrings
+  else if (("polygons" %in% type)&length(type==1)) extents=swaths
+  else if (("linestrings" %in% type & "polygons" %in% type)|type=="all")  extents <- rbind(swaths,linestrings) #|> tidyr::nest(.by =ID)
   cat("\n")
   #bundle <- list(polygons=swaths,linestrings=linestrings)
   #names(bundle) <- unique(linestrings$ID)

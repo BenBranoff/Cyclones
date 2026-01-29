@@ -1,21 +1,21 @@
 #' @importFrom sf st_coordinates st_as_sfc st_sf st_crs st_shift_longitude
 #' @importFrom terra rast res ext extend approximate setValues shift resample app allNA ifel time
 get_wind <- function(lines,s_res=20000,t_res=60,methods=NULL){
-  get_lines <- function(x, element) {
-    if(is.list(x)) { if(element %in% names(x)) x[[element]] else lapply(x, get_lines, element = element)}
-  }
-  lines <- get_lines(lines,"linestrings")
   if (is.null(dim(lines))){
     warning("More than one storm in data. Only first will be used. Use lapply or a parallel equivalent to repeat for multiple storms")
     lines <- lines[[1]]
   }
   winds <- list()
   centers = interp_track(lines,t_res)
+  if(methods=="all") methods=c("TPS","Willoughby","Boose","Holland")
 
   if ("TPS" %in% methods||is.null(methods)){
+    if (!"linestrings" %in% lines$extent_type) stop("wrong geometry type. TPS accepts only linestrings.")
+
     msw <- lapply(seq_along(unique(lines$date)),TPS_int,lines, centers, s_res)
     msw <- rast(msw)
     names(msw) <- rep(paste("MSW",unique(lines$name),unique(format(lines$date,"%Y")),"TPS",sep="_"),terra::nlyr(msw))
+    msw <- wrap(msw)
     winds=append(winds,list(msw))
     names(winds)[length(winds)] <- paste("MSW",unique(lines$name),unique(format(lines$date,"%Y")),"TPS",sep="_")
     cat("\n")
@@ -72,6 +72,7 @@ get_wind <- function(lines,s_res=20000,t_res=60,methods=NULL){
       names(msw) <- rep(paste("MSW",unique(lines$name),unique(format(lines$date,"%Y")),meth,sep="_"),terra::nlyr(msw))
       #msw <- max(rast(msw), na.rm = TRUE)
       msw <- terra::focal(msw, w = matrix(1, nbg, nbg), mean, na.rm = TRUE, pad = TRUE)
+      msw <- wrap(msw)
       winds=append(winds,list(msw))
       names(winds)[length(winds)] <- paste("MSW",unique(lines$name),unique(format(lines$date,"%Y")),meth,sep="_")
       cat("\n")

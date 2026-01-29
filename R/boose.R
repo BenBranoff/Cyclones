@@ -36,7 +36,7 @@ boose <- function(L,cens,tmpRas) {
     # Southern Hemisphere, t is counterclockwise
     angle <- atan2(y, x) - atan2(vy, vx)
   }
-  landIntersect <- extract(land,crds)
+  landIntersect <- terra::extract(land,crds)
   vr[landIntersect == 1] <- 0.8 * (msw - (1 - sin(angle[landIntersect == 1])) * vh[landIntersect == 1] / 2) * vr[landIntersect == 1]
   vr[landIntersect == 0] <- (msw - (1 - sin(angle[landIntersect == 0])) * vh / 2) * vr[landIntersect == 0]
   vr <- round(vr,3)

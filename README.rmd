@@ -13,11 +13,13 @@ Use the 'get_storms' function to gather the available time series and wind infor
 #library(Cyclones)
 devtools::load_all()
 allstorms <- get_storms("E:/OneDrive - USDA/Hurricanes/ibtracs.ALL.list.v04r01.csv")
-storms <- allstorms |>
-              slice(grep("HELENE_2024|MILTON_2024",ID))
+storms <- allstorms[grep("MICHAEL_2018|MARIA_2017",names(allstorms))]
 ```
 ``` {r,eval=FALSE}
 library(Cyclones)
+##  for plotting and post-processing of spatial data
+library(sf)
+library(terra)
 
 ##  storms can be singular or plural and can be identified specifically, or not
 storms <- get_storms(source="hurdat",name="Maria",basin="NA",season=2017)
@@ -28,8 +30,7 @@ names(storms)
 ##  downloading all storms will likely require extending the timeout time
 ##  options(timeout = 300)
 allstorms <- get_storms(ib_filt="ALL")
-storms <- allstorms |>
-              slice(grep("HELENE_2024|MILTON_2024",ID))
+storms <- allstorms[grep("HELENE_2024|MILTON_2024",names(allstorms))]
 ```
 
 With the data loaded, it can now be used to build rasters of wind, precipitation, and/or storm surge, as well as a combined Tropical Cyclone Severity Scale (TCSS) (Bloemendale et al. (2021)). If the Thin Plate Spline (TPS) wind method is desired, models are built into a lookup table (The empirical TPS method is shown below to be more accurate than the theoretical models). These lookup tables should be based on as full or limited a set of storms as necessary for the objective. For generalized modeling, its best to use a full set of storms.
@@ -42,26 +43,25 @@ mods <- build_models(tracks=allstorms)
 These models will allow the reconstruction of certain wind extents when missing, which is often the case for older (pre 2018) storms. Again, if generalized wind fields are desired, the other non-TPS methods can be used as explained further below. But if the objective is to create wind field predictions specific to each quadrant and each basin and each storm category based on the other storms in the data, we use these models.
 
 ```{r, warning=FALSE,message=FALSE,results='hide'}
-##  generate linestring and polygon wind extent features for each timestep in each storm
+##  generate linestring (default) and polygon (optionally) wind extent features for each timestep in each storm
 ##  when used as shown below with multiple storms as an input, the functions will only perform the action on the first storm
-windextents <- make_extent(storms,mods=mods)
+windextents <- make_extent(storms,mods=mods,type=c("linestrings","polygons"))
 
 ##  To apply the function to all storms, use lapply or a parallel equivalent (snowfall::sfLapply)
-windextents <- lapply(storms$data,make_extent, mods=mods)
+windextents <- lapply(storms,make_extent, mods=mods)
 
-##  The linestrings and polygons are stored separately and can be pulled out accordingly
+##  If both linestrings and polygons were returned, they can be pulled out accordingly
 linestrings <- lapply(windextents,function(x) x[x$extent_type=="linestrings",])
+polygons <- lapply(windextents,function(x) x[x$extent_type=="polygons",])
 ##  the individual storms are projected in their own crs, centered on the storm. To get them all in the same CRS, if desired
 linestrings <- lapply(linestrings,st_transform,crs=4326)
-
-polygons <- lapply(windextents,function(x) x[x$extent_type=="polygons",])
-
 ```
 
 ```{r, echo=FALSE}
 library(ggplot2)
+library(patchwork)
 
-ggplot(do.call(rbind,linestrings))+
+mich <- ggplot(linestrings[[2]])+
 geom_sf(data=rnaturalearth::ne_countries(scale="medium"))+
 geom_sf(aes(col=kts,fill=kts))+
 scale_color_gradientn(
@@ -72,12 +72,13 @@ scale_fill_gradientn(
     colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
     values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
 limits = c(0, 150))+
-facet_wrap(~ID)+
-ggtitle("Hurricanes Helene and Milton wind extents")+
-theme_bw()+
-xlim(-100,-75)+ylim(15,45)
-
-ggplot(do.call(rbind,linestrings)|>filter(kts>=64))+
+  #geom_blank(data=limits,aes(x = lon_min, y = lat_min)) +
+  #geom_blank(data=limits, aes(x = lon_max, y = lat_max)) +
+#facet_grid(~ID,space="fixed")+
+ggtitle("Hurricane Michael")+
+theme_bw()+theme(legend.position="none")+
+xlim(-90,-70)+ylim(20,40)
+mari <- ggplot(linestrings[[1]])+
 geom_sf(data=rnaturalearth::ne_countries(scale="medium"))+
 geom_sf(aes(col=kts,fill=kts))+
 scale_color_gradientn(
@@ -88,9 +89,114 @@ scale_fill_gradientn(
     colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
     values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
 limits = c(0, 150))+
-facet_wrap(~ID)+
-ggtitle("Hurricanes Helene and Milton wind extents - Cat. 1+")+
+  #geom_blank(data=limits,aes(x = lon_min, y = lat_min)) +
+  #geom_blank(data=limits, aes(x = lon_max, y = lat_max)) +
+#facet_grid(~ID,space="fixed")+
+ggtitle("Hurricane Maria")+
 theme_bw()+
-xlim(-93,-78)+ylim(20,35)
+xlim(-80,-50)+ylim(10,30)
+mich+mari
 
+
+mich <- ggplot(linestrings[[2]]|>filter(kts>=64))+
+geom_sf(data=rnaturalearth::ne_countries(scale="medium"))+
+geom_sf(aes(col=kts,fill=kts))+
+scale_color_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(0, 150))+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+limits = c(0, 150))+
+  #geom_blank(data=limits,aes(x = lon_min, y = lat_min)) +
+  #geom_blank(data=limits, aes(x = lon_max, y = lat_max)) +
+#facet_grid(~ID,space="fixed")+
+ggtitle("Hurricane Michael - Cat. 1+")+
+theme_bw()+theme(legend.position="none")+
+xlim(-88,-82)+ylim(28,32)
+mari <- ggplot(linestrings[[1]]|>filter(kts>=64))+
+geom_sf(data=rnaturalearth::ne_countries(scale="medium"))+
+geom_sf(aes(col=kts,fill=kts))+
+scale_color_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+    limits = c(0, 150))+
+scale_fill_gradientn(
+    colours = c("black","lightgreen","#44AA99","#DDCC77","#CC6677","#882255"),
+    values = scales::rescale(c(64, 83, 96, 113,137)), # breakpoints in data space
+limits = c(0, 150))+
+  #geom_blank(data=limits,aes(x = lon_min, y = lat_min)) +
+  #geom_blank(data=limits, aes(x = lon_max, y = lat_max)) +
+#facet_grid(~ID,space="fixed")+
+ggtitle("Hurricane Maria - Cat. 1+")+
+theme_bw()+
+xlim(-68,-62)+ylim(16,20)
+mich+mari
 ```
+
+Next, we interpolate and model the winds across space and time, creating a more complete grided representation that can be useful in any number of applications.  This is accomplished through either one of three theoretical models, or through an empirical Thin Plate Spline, which utilizes the above linestrings. The 'make_winds' function accepts both spatial and temporal resolution specifications. Although accuracy and smoothness are optimized at smaller resolutions, computation times suffer. For initial testing, a spatial resolution of 20km and a temporal resolution of 60 mins is reasonable. Because terra::raster objects are saved on disc rather than memory, they can not be passed and collected as part of parallel processes. Therefore, results from get_wind are wrapped rasters in case a parallel operation is desired. They must be separated and unwrapped before they can be used for most operations. All storm layers are projected onto a Lambert Azimuthal Equal Area reference system that is centered on the storm's extent, which preserves area across large geographic regions and avoids geographic coordinate issues at the Antimeridian, which is often an issue for Pacific cyclones.      
+
+```{r,eval=FALSE}
+winds <- get_wind(windextents,methods=c("all"))
+### unwrap
+winds <- lapply(winds, function(x) lapply(x,unwrap))
+###  the layers are stored in nested lists in which individual time steps are nested within each storm
+winds$MARIA_2017_NA_2017260N12310
+
+plot(winds$MARIA_2017_NA_2017260N12310$MSW_MARIA_2017_TPS)
+
+###  To display the entire storm together, all time steps must be aggregated appropriately, depending on the metric.
+###  For maximum sustained winds (MSW), we likely are interested in the maximum value experienced by each cell throughout the storm's trajectory.
+MSW_Maria <- lapply(winds$MARIA_2017_NA_2017260N12310, app,fun=max,na.rm=TRUE)
+##  plot all the results
+par(mfrow=c(2,2))
+### get world boundaries
+countries <- rnaturalearth::ne_countries(scale="Medium",continent = c("north america","south america","Europe","Africa"))|> st_transform(crs(MSW_Maria$MSW_MARIA_2017_TPS))
+plot(MSW_Maria$MSW_MARIA_2017_TPS, main="Maria, 2017 MSW (m/s) via TPS",range=c(0,80))
+plot(countries|>st_geometry(),add=TRUE)
+plot(MSW_Maria$MSW_MARIA_2017_Willoughby, main="Maria, 2017 MSW (m/s) via Willoughby",range=c(0,80))
+plot(rnaturalearth::ne_countries(scale="Medium")|>st_transform(crs(MSW_Maria$MSW_MARIA_2017_TPS))|>st_geometry(),add=TRUE)
+plot(MSW_Maria$MSW_MARIA_2017_Holland, main="Maria, 2017 MSW (m/s) via Holland",range=c(0,80))
+plot(rnaturalearth::ne_countries(scale="Medium")|>st_transform(crs(MSW_Maria$MSW_MARIA_2017_TPS))|>st_geometry(),add=TRUE)
+plot(MSW_Maria$MSW_MARIA_2017_Boose, main="Maria, 2017 MSW (m/s) via Boose",range=c(0,80))
+plot(rnaturalearth::ne_countries(scale="Medium")|>st_transform(crs(MSW_Maria$MSW_MARIA_2017_TPS))|>st_geometry(),add=TRUE)
+###  zooming in on Puerto Rico, where the storm reached peak intensity
+plot(MSW_Maria$MSW_MARIA_2017_TPS, main="Maria, 2017 MSW (m/s) via TPS",range=c(0,80),xlim=c(-1e6,0),ylim=c(-1.5e6,-0.5e6))
+plot(countries|>st_geometry(),add=TRUE)
+plot(MSW_Maria$MSW_MARIA_2017_Willoughby, main="Maria, 2017 MSW (m/s) via Willoughby",range=c(0,80),xlim=c(-1e6,0),ylim=c(-1.5e6,-0.5e6))
+plot(countries|>st_geometry(),add=TRUE)
+plot(MSW_Maria$MSW_MARIA_2017_Holland, main="Maria, 2017 MSW (m/s) via Holland",range=c(0,80),xlim=c(-1e6,0),ylim=c(-1.5e6,-0.5e6))
+plot(countries|>st_geometry(),add=TRUE)
+plot(MSW_Maria$MSW_MARIA_2017_Boose, main="Maria, 2017 MSW (m/s) via Boose",range=c(0,80),xlim=c(-1e6,0),ylim=c(-1.5e6,-0.5e6))
+plot(countries|>st_geometry(),add=TRUE)
+
+
+####################
+#  parallel via snowfall
+####################
+#library(snowfall)
+#sfStop()
+#logtmp <- tempfile(fileext=".txt")
+#sfInit(parallel=TRUE, cpus=2) ## WARNING: Do not overdo the number of CPUs. Verify your machine's capacity beforehand.
+##  the parallel cpus will each do one storm, so no point in giving it more cpus than there are storms to process.
+#sfLibrary(sf)
+#sfLibrary(terra)
+#sfLibrary(dplyr)
+#sfLibrary(fields) # for the TPS models
+#sfLibrary(geosphere)  # for the bearing function
+#sfExport('interp_track','TPS_int','line_int','get_dir','boose','holland','willoughby','computeAsymmetry')
+#winds <- sfLapply(windextents,get_wind,methods="all",s_res=20000,t_res=60)
+#sfStop()
+#winds <- lapply(winds, function(x) lapply(x,unwrap))
+```
+```{r,echo=FALSE}
+winds_30_5000 <- readRDS("E:/OneDrive - USDA/Hurricanes/R Package/winds_30_5000.R")
+winds <- lapply(winds, function(x) lapply(x,unwrap))
+winds$MARIA_2017_NA_2017260N12310
+plot(winds$MARIA_2017_NA_2017260N12310$MSW_MARIA_2017_TPS)
+```
+
+
+
+The rasters produced via the above get_winds routine contain a layer for each time step as specified in t_res. They are listed and wrapped, and need to be separated and unwrapped before they can be used.  

@@ -13,18 +13,19 @@ TPS_int <- function(L,lines,centers,s_res=20000){
   #  mutate(dt=as.numeric(difftime(date,diag(sapply(l, function(n) dplyr::lag(date, n=n))))))
   ###  get the date stamps of the lines
   dts <- unique(lne$date)#[1:(length(unique(lne$date)))]
+ # browser()
   d1 <- unique(dts)[L]
   d2 <- unique(dts)[which(unique(dts)==d1)+1]
   timestep <- as.numeric(difftime(d2,d1,units="hours"))
-  if (!is.na(timestep)&timestep>.25){
+  #if (!is.na(timestep)&timestep>.25){
     line1 <- lne |>
       filter(date==d1)
     line2 <- lne |>
       filter(date==d2)
     if(d1==unique(dts)[length(unique(dts))]){end=T}else{end=F}
-  }else{
-    stop("insufficient timestep in line segments")
-  }
+  #}else{
+  #  warning(paste0("insufficient timestep in line segments at ",d1))
+  #}
   ###  create custom crs centered on current track segment
   ##  this reduces geometry calculation errors from using a general global crs
   custCRS <- paste0("+proj=laea +x_0=0 +y_0=0 +lon_0=",
@@ -163,7 +164,7 @@ TPS_int <- function(L,lines,centers,s_res=20000){
   ####   this is for quality control
  # comps <- compare_winds(rasts=V,shape=line1)
  # comps <- if(comps) data.frame(comps$lsamps) else NULL
-  cat(paste("\rCaclulating wind field via Thin Plate Spline: %",round(100*L/ length(unique(lines$date)),1)))
+  message(paste("\rCaclulating wind field via Thin Plate Spline: %",round(100*L/ length(unique(lines$date)),1)))
   Sys.sleep(0.01)
   V/1.943846
   #list(Vel=V,Power=P,Dir=D,linecomps=comps,rastcomps=data.frame(comps$rsamps))
